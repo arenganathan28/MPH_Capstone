@@ -1,0 +1,1896 @@
+---
+title: "Capstone Final Analysis: Reproducing a Study on Racial and Ethnic Disparities in HIV and STIs in the United States"
+author: "Anjana Renganathan"
+creation date: "February 17, 2020"
+Latest edit: "April 14, 2020"
+output: pdf_document
+---
+#Prologue
+
+##Purpose
+Statistical analysis for capstone on racial and ethnic dispairities in HIV and STIs in the United States using NHANES data. 
+
+##DATA
+NHANES files from 1999-2012, for Demographics, Health Insurance, Hospital Utilization & Access to Care, Sexual Behavior, and Occupation, as well as the laboratory data for Urine Chlamydia, Hepatitis C Antibodies, Herpes Simplex Virus Type 1 & Type 2, and the HIV Antibody test.  Available here: https://www.cdc.gov/nchs/nhanes/index.htm
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#INSTALL ALL NECESSARY PACKAGES
+#install.packages("RNHANES")
+#install.packages("survey")
+#install.packages("dplyr")
+#install.packages("tidyverse")
+#install.packages("jtools")
+#install.packages("dataMaid")
+#install.packages("expss")
+
+#LOAD LIBRARIES
+library(RNHANES) #package used to download NHANES data directly from the website
+library(survey)#package used for complex survey design and analysis, incorporates weights
+library(dplyr) #package used for recoding
+library(tidyverse) #package used for recoding
+
+
+#these two libraries interfere with earlier parts and so are loaded later at line 1510
+            #library(jtools) #to clean up multivariate logistic regression outputs (you can specifically request OR, 95% CI)
+            #library(dataMaid) #for codebook creation
+            #library(expss) #for filling out codebook labels and descriptions
+
+#NOTE ON DPLYR AND CAR
+#recoding is done utilizing dplyr, detach car package to avoid errors
+#if car is not loaded, the following will spit out an error
+#detach(package:car, unload = TRUE)
+
+# download NHANES data directly from website
+nhanes1999<- nhanes_load_data(c("LAB02", "LAB03", "LAB05", "LAB09", "HIQ", "HUQ", "HSQ", "SXQ", "OCQ", "DEMO"), c("1999-2000", "1999-2000","1999-2000","1999-2000","1999-2000","1999-2000","1999-2000","1999-2000", "1999-2000"), cache = "./nhanes_data")
+
+nhanes2001<- nhanes_load_data(c("L02_B", "L03_B", "L05_B", "L09_B", "HIQ_B", "HUQ_B","HSQ_B", "SXQ_B", "OCQ_B", "DEMO_B"), c("2001-2002","2001-2002","2001-2002","2001-2002","2001-2002","2001-2002","2001-2002","2001-2002", "2001-2002"), cache = "./nhanes_data")
+
+nhanes2003<- nhanes_load_data(c("L02_C", "L03_C", "L05_C", "L09_C", "HIQ_C", "HUQ_C","HSQ_C", "SXQ_C", "OCQ_C", "DEMO_C"), c("2003-2004","2003-2004","2003-2004","2003-2004","2003-2004","2003-2004","2003-2004","2003-2004", "2003-2004"), cache = "./nhanes_data")
+
+nhanes2005<- nhanes_load_data(c("DEMO_D", "HEPC_D", "HSV_D", "HIV_D", "CHLMDA_D", "HIQ_D", "HUQ_D","HSQ_D", "SXQ_D", "OCQ_D"), c("2005-2006","2005-2006","2005-2006","2005-2006","2005-2006","2005-2006","2005-2006","2005-2006", "2005-2006"), cache = "./nhanes_data")
+
+nhanes2007<- nhanes_load_data(c("DEMO_E", "HEPC_E", "HSV_E", "HIV_E", "CHLMDA_E", "HIQ_E", "HUQ_E", "HSQ_E", "SXQ_E", "OCQ_E"), c("2007-2008","2007-2008","2007-2008","2007-2008","2007-2008","2007-2008","2007-2008","2007-2008", "2007-2008"), cache = "./nhanes_data")
+
+nhanes2009<- nhanes_load_data(c("DEMO_F", "HEPC_F", "HSV_F", "HIV_F", "CHLMDA_F", "HIQ_F", "HUQ_F", "HSQ_F","SXQ_F", "OCQ_F"), c("2009-2010","2009-2010","2009-2010","2009-2010","2009-2010","2009-2010","2009-2010","2009-2010", "2009-2010"), cache = "./nhanes_data")
+
+nhanes2011<- nhanes_load_data(c("DEMO_G", "HEPC_G", "HSV_G", "HIV_G", "CHLMDA_G", "HIQ_G", "HUQ_G", "HSQ_G","SXQ_G", "OCQ_G"), c("2011-2012","2011-2012","2011-2012","2011-2012","2011-2012","2011-2012","2011-2012","2011-2012", "2011-2012"), cache = "./nhanes_data")
+```
+
+
+```{r selecting variables, echo=FALSE}
+#creating smaller datasets out of the huge yearly ones
+#1999
+demo.99<- nhanes1999$DEMO %>%
+  select(SEQN, SDDSRVYR, SDMVPSU, SDMVSTRA, WTMEC4YR, RIDRETH1, RIDAGEYR, RIAGENDR, DMDEDUC2, INDFMINC, DMDMARTL, DMDBORN)%>%
+  mutate(DMDBORN= recode(DMDBORN,
+                                `3` = 2,
+                                `7` = 77,
+                                `9` = 99))%>% #recoded and renamed to fit the levels of DMDBORN4 from survey cycle 07-09
+  rename(DMDBORN4=DMDBORN) %>%
+  add_column(WTMEC2YR="")#added for vert merge later, empty
+demo.99 <-  add_column(demo.99, MEC14YR= 2/7*demo.99$WTMEC4YR) #weighting
+lab2.99 <- nhanes1999$LAB02 %>%
+  select(SEQN, LBDHCV)
+lab3.99 <- nhanes1999$LAB03 %>%
+  select(SEQN, LBDHI)
+lab5.99 <- nhanes1999$LAB05 %>%
+  select(SEQN, URXUCL)
+lab9.99 <- nhanes1999$LAB09 %>%
+  select(SEQN, LBXHE2)
+hiq.99 <- nhanes1999$HIQ %>%
+  select(SEQN, HID010)
+huq.99 <- nhanes1999$HUQ %>%
+  select(SEQN, HUQ030)
+hsq.99 <- nhanes1999$HSQ %>%
+  select(SEQN, HSQ590)
+sxq.99 <- nhanes1999$SXQ %>%
+  select(SEQN, SXQ270, SXQ272, SXQ260, SXQ265)
+ocq.99 <- nhanes1999$OCQ %>%
+  select(SEQN, OCQ150)%>%     
+  rename(OCD150=OCQ150)        #OCD150 and OCQ150 are identical, rename for merge later
+#merging horizontally by year
+nhanes1999.cln <- demo.99 %>%
+  full_join(lab2.99, by= "SEQN") %>%
+  full_join(lab3.99, by="SEQN") %>%
+  full_join(lab5.99, by="SEQN") %>%
+  full_join(lab9.99, by="SEQN") %>%
+  full_join(hiq.99, by="SEQN") %>%
+  full_join(huq.99, by="SEQN") %>%
+  full_join(hsq.99, by="SEQN")%>%
+  full_join(sxq.99, by="SEQN")%>%
+  full_join(ocq.99, by="SEQN")
+
+#2001
+demo.01<- nhanes2001$DEMO %>%
+  select(SEQN, SDDSRVYR, SDMVPSU, SDMVSTRA, WTMEC4YR, RIDRETH1, RIDAGEYR, RIAGENDR, DMDEDUC2, INDFMINC, DMDMARTL, DMDBORN)%>%
+  mutate(DMDBORN= recode(DMDBORN,
+                                `3` = 2,
+                                `7` = 77,
+                                `9` = 99))%>% #recoded and renamed to fit the levels of DMDBORN4 from survey cycle 07-09
+  rename(DMDBORN4=DMDBORN) %>%
+  add_column(WTMEC2YR="")
+demo.01<- add_column(demo.01, MEC14YR= 2/7* demo.01$WTMEC4YR)
+lab2.01 <- nhanes2001$L02_B %>%
+  select(SEQN, LBDHCV)
+lab3.01 <- nhanes2001$L03_B %>%
+  select(SEQN, LBDHI)
+lab5.01 <- nhanes2001$L05_B %>%
+  select(SEQN, URXUCL)
+lab9.01 <- nhanes2001$L09_B %>%
+  select(SEQN, LBXHE2)
+hiq.01 <- nhanes2001$HIQ_B %>%
+  select(SEQN, HID010)
+huq.01 <- nhanes2001$HUQ_B %>%
+  select(SEQN, HUQ030)
+hsq.01 <- nhanes2001$HSQ_B %>%
+  select(SEQN, HSQ590)
+sxq.01 <- nhanes2001$SXQ_B %>%
+  select(SEQN, SXQ270, SXQ272, SXQ260, SXQ265)
+ocq.01 <- nhanes2001$OCQ_B %>%
+  select(SEQN, OCD150)
+#merge by year
+nhanes2001.cln <- demo.01 %>%
+  full_join(lab2.01, by= "SEQN") %>%
+  full_join(lab3.01, by="SEQN") %>%
+  full_join(lab5.01, by="SEQN") %>%
+  full_join(lab9.01, by="SEQN") %>%
+  full_join(hiq.01, by="SEQN") %>%
+  full_join(huq.01, by="SEQN") %>%
+  full_join(hsq.01, by="SEQN")%>%
+  full_join(sxq.01, by="SEQN")%>%
+  full_join(ocq.01, by= "SEQN")
+
+#2003
+demo.03<- nhanes2003$DEMO %>%
+  select(SEQN, SDDSRVYR, SDMVPSU, SDMVSTRA, WTMEC2YR, RIDRETH1, RIDAGEYR, RIAGENDR, DMDEDUC2, INDFMINC, DMDMARTL, DMDBORN)%>%
+  mutate(DMDBORN= recode(DMDBORN,
+                                `3` = 2,
+                                `7` = 77,
+                                `9` = 99))%>% #recoded and renamed to fit the levels of DMDBORN4 from survey cycle 07-09
+  rename(DMDBORN4=DMDBORN) %>%
+  add_column(WTMEC4YR="")  #added for vert merge
+demo.03 <- add_column(demo.03, MEC14YR= 1/7* demo.03$WTMEC2YR)
+lab2.03 <- nhanes2003$L02 %>%
+  select(SEQN, LBDHCV)
+lab3.03 <- nhanes2003$L03 %>%
+  select(SEQN, LBDHI)
+lab5.03 <- nhanes2003$L05 %>%
+  select(SEQN, URXUCL)
+lab9.03 <- nhanes2003$L09 %>%
+  select(SEQN, LBXHE2)
+hiq.03 <- nhanes2003$HIQ %>%
+  select(SEQN, HID010)
+huq.03 <- nhanes2003$HUQ %>%
+  select(SEQN, HUQ030)
+hsq.03 <- nhanes2003$HSQ %>%
+  select(SEQN, HSQ590)
+sxq.03 <- nhanes2003$SXQ %>%
+  select(SEQN, SXQ270, SXQ272, SXQ260, SXQ265)
+ocq.03 <- nhanes2003$OCQ %>%
+  select(SEQN, OCD150)
+#merge by year
+nhanes2003.cln <- demo.03 %>%
+  full_join(lab2.03, by= "SEQN") %>%
+  full_join(lab3.03, by="SEQN") %>%
+  full_join(lab5.03, by="SEQN") %>%
+  full_join(lab9.03, by="SEQN") %>%
+  full_join(hiq.03, by="SEQN") %>%
+  full_join(huq.03, by="SEQN") %>%
+  full_join(hsq.03, by="SEQN")%>%
+  full_join(sxq.03, by="SEQN")%>%
+  full_join(ocq.03, by= "SEQN")
+
+
+#2005
+demo.05<- nhanes2005$DEMO %>%
+  select(SEQN, SDDSRVYR, SDMVPSU, SDMVSTRA, WTMEC2YR, RIDRETH1, RIDAGEYR, RIAGENDR, DMDEDUC2, INDFMINC, DMDMARTL, DMDBORN)%>%
+  mutate(DMDBORN= recode(DMDBORN,
+                                `3` = 2,
+                                `7` = 77,
+                                `9` = 99))%>% #recoded and renamed to fit the levels of DMDBORN4 from survey cycle 07-09
+  rename(DMDBORN4=DMDBORN)%>%
+  add_column(WTMEC4YR="")
+demo.05 <-add_column(demo.05, MEC14YR= 1/7* demo.05$WTMEC2YR)
+hepc.05 <- nhanes2005$HEPC %>%
+  select(SEQN, LBDHCV)
+hiv.05 <- nhanes2005$HIV %>%
+  select(SEQN, LBDHI)
+chl.05 <- nhanes2005$CHLMDA %>%
+  select(SEQN, URXUCL)
+hsv.05 <- nhanes2005$HSV %>%
+  select(SEQN, LBXHE2)
+hiq.05 <- nhanes2005$HIQ %>%  #HIQ010 changed to HIQ011 in NHANES
+  select(SEQN, HIQ011)%>%     # variables directly comparable in codebook, so just renamed to old name
+  rename(HID010=HIQ011)
+huq.05 <- nhanes2005$HUQ %>%
+  select(SEQN, HUQ030)
+hsq.05 <- nhanes2005$HSQ %>%
+  select(SEQN, HSQ590)
+sxq.05 <- nhanes2005$SXQ %>%
+  select(SEQN, SXQ270, SXQ272, SXQ260, SXQ265)
+ocq.05 <- nhanes2005$OCQ %>%
+  select(SEQN, OCD150)
+
+#merge by year
+nhanes2005.cln <- demo.05 %>%
+  full_join(hepc.05, by= "SEQN") %>%
+  full_join(hiv.05, by="SEQN") %>%
+  full_join(chl.05, by="SEQN") %>%
+  full_join(hsv.05, by="SEQN") %>%
+  full_join(hiq.05, by="SEQN") %>%
+  full_join(huq.05, by="SEQN") %>%
+  full_join(hsq.05, by="SEQN")%>%
+  full_join(sxq.05, by="SEQN")%>%
+  full_join(ocq.05, by= "SEQN")
+
+#2007
+#INDFMINC changed to INDFMIN2  #100k category added  
+#DMDBORN changed to DMDBORN2 #spanish, non-spanish speaking country added
+demo.07<- nhanes2007$DEMO %>%
+  select(SEQN, SDDSRVYR, SDMVPSU, SDMVSTRA, WTMEC2YR, RIDRETH1, RIDAGEYR, RIAGENDR, DMDEDUC2, INDFMIN2, DMDMARTL, DMDBORN2)%>%
+  mutate(DMDBORN2= recode(DMDBORN2,
+                                `4` = 2,
+                                `5` = 2,
+                                `7` = 77,
+                                `9` = 99))%>% #recoded and renamed to fit the levels of DMDBORN4 from survey cycle 07-09
+  rename(DMDBORN4=DMDBORN2)%>%
+  add_column(WTMEC4YR="")%>%
+  mutate(INDFMIN2= recode(INDFMIN2,
+                          `14`=11,
+                          `15`=11))%>% #indfmin2 recoded to fit indfminc bc it has fewer levels
+  rename(INDFMINC=INDFMIN2) #renamed to indfminc
+demo.07 <-add_column(demo.07, MEC14YR= 1/7* demo.07$WTMEC2YR)
+hepc.07 <- nhanes2007$HEPC %>%
+  select(SEQN, LBDHCV)
+hiv.07 <- nhanes2007$HIV %>%
+  select(SEQN, LBDHI)
+chl.07 <- nhanes2007$CHLMDA %>%
+  select(SEQN, URXUCL)
+hsv.07 <- nhanes2007$HSV %>%
+  select(SEQN, LBXHE2)
+hiq.07 <- nhanes2007$HIQ %>%
+  select(SEQN, HIQ011)%>%     
+  rename(HID010=HIQ011)    #renamed
+huq.07 <- nhanes2007$HUQ %>%
+  select(SEQN, HUQ030)
+hsq.07 <- nhanes2007$HSQ %>%
+  select(SEQN, HSQ590)
+sxq.07 <- nhanes2007$SXQ %>%
+  select(SEQN, SXQ270, SXQ272, SXQ260, SXQ265)
+ocq.07 <- nhanes2007$OCQ %>%
+  select(SEQN, OCD150)
+#merge by year
+nhanes2007.cln <- demo.07 %>%
+  full_join(hepc.07, by= "SEQN") %>%
+  full_join(hiv.07, by="SEQN") %>%
+  full_join(chl.07, by="SEQN") %>%
+  full_join(hsv.07, by="SEQN") %>%
+  full_join(hiq.07, by="SEQN") %>%
+  full_join(huq.07, by="SEQN") %>%
+  full_join(hsq.07, by="SEQN")%>%
+  full_join(sxq.07, by="SEQN")%>%
+  full_join(ocq.07, by= "SEQN")
+
+
+#2009
+demo.09<- nhanes2009$DEMO %>%
+  select(SEQN, SDDSRVYR, SDMVPSU, SDMVSTRA, WTMEC2YR, RIDRETH1, RIDAGEYR, RIAGENDR, DMDEDUC2, INDFMIN2, DMDMARTL, DMDBORN2)%>%
+  mutate(DMDBORN2= recode(DMDBORN2,
+                                `4` = 2,
+                                `5` = 2,
+                                `7` = 77,
+                                `9` = 99))%>% #recoded and renamed to fit the levels of DMDBORN4 from survey cycle 07-09
+  rename(DMDBORN4=DMDBORN2)%>%
+  add_column(WTMEC4YR="")%>%
+  mutate(INDFMIN2= recode(INDFMIN2,
+                          `14`=11,
+                          `15`=11))%>% #recoded indfmin2 to indfminc
+  rename(INDFMINC=INDFMIN2) #renamed to indfminc
+demo.09<-  add_column(demo.09, MEC14YR= 1/7* demo.09$WTMEC2YR)
+hepc.09 <- nhanes2009$HEPC %>%
+  select(SEQN, LBDHCV)
+hiv.09 <- nhanes2009$HIV %>%
+  select(SEQN, LBDHI)
+chl.09 <- nhanes2009$CHLMDA %>%
+  select(SEQN, URXUCL)
+hsv.09 <- nhanes2009$HSV %>%
+  select(SEQN, LBXHE2)
+hiq.09 <- nhanes2009$HIQ %>%
+  select(SEQN, HIQ011)%>%     
+  rename(HID010=HIQ011)    #renamed
+huq.09 <- nhanes2009$HUQ %>%
+  select(SEQN, HUQ030)
+hsq.09 <- nhanes2009$HSQ %>%
+  select(SEQN, HSQ590)
+sxq.09 <- nhanes2009$SXQ %>%
+  select(SEQN, SXQ270, SXQ272, SXQ260, SXQ265)
+ocq.09 <- nhanes2009$OCQ %>%
+  select(SEQN, OCD150)
+#merge by year
+nhanes2009.cln <- demo.09 %>%
+  full_join(hepc.09, by= "SEQN") %>%
+  full_join(hiv.09, by="SEQN") %>%
+  full_join(chl.09, by="SEQN") %>%
+  full_join(hsv.09, by="SEQN") %>%
+  full_join(hiq.09, by="SEQN") %>%
+  full_join(huq.09, by="SEQN") %>%
+  full_join(hsq.09, by="SEQN")%>%
+  full_join(sxq.09, by="SEQN")%>%
+  full_join(ocq.09, by= "SEQN")
+
+#2011
+demo.11<- nhanes2011$DEMO %>%
+  select(SEQN, SDDSRVYR, SDMVPSU, SDMVSTRA, WTMEC2YR, RIDRETH1, RIDAGEYR, RIAGENDR, DMDEDUC2, INDFMIN2, DMDMARTL, DMDBORN4)%>%  #DMDBORN2 to DMDBORN4 spanish and nonspanish and mexico removed, just US, others, refused, DN, and missing
+  add_column(WTMEC4YR="")%>%
+  mutate(INDFMIN2= recode(INDFMIN2,
+                          `14`=11,
+                          `15`=11))%>% #recoded indfminc2 to indfminc
+  rename(INDFMINC=INDFMIN2)#renamed to indfminc
+demo.11<-add_column(demo.11, MEC14YR= 1/7* demo.11$WTMEC2YR)
+hepc.11 <- nhanes2011$HEPC %>%                                 #because DMDBORN4 has smallest # categories, all other DMDBORN
+  select(SEQN, LBDHCV)                                         #were simpliflied to this level
+hiv.11 <- nhanes2011$HIV %>%
+  select(SEQN, LBDHI)
+chl.11 <- nhanes2011$CHLMDA %>%
+  select(SEQN, URXUCL)
+hsv.11 <- nhanes2011$HSV %>%
+  select(SEQN, LBXHE2)
+hiq.11 <- nhanes2011$HIQ %>%
+  select(SEQN, HIQ011)%>%     
+  rename(HID010=HIQ011)    #renamed
+huq.11 <- nhanes2011$HUQ %>%
+  select(SEQN, HUQ030)
+hsq.11 <- nhanes2011$HSQ %>%
+  select(SEQN, HSQ590)
+sxq.11 <- nhanes2011$SXQ %>%
+  select(SEQN, SXQ270, SXQ272, SXQ260, SXQ265)
+ocq.11 <- nhanes2011$OCQ %>%
+  select(SEQN, OCD150)
+#merge horizontally by year
+nhanes2011.cln <- demo.11 %>%
+  full_join(hepc.11, by= "SEQN") %>%
+  full_join(hiv.11, by="SEQN") %>%
+  full_join(chl.11, by="SEQN") %>%
+  full_join(hsv.11, by="SEQN") %>%
+  full_join(hiq.11, by="SEQN") %>%
+  full_join(huq.11, by="SEQN") %>%
+  full_join(hsq.11, by="SEQN")%>%
+  full_join(sxq.11, by="SEQN")%>%
+  full_join(ocq.11, by= "SEQN")
+
+
+#Merge all years together, vertically
+nhn.total.cln <- rbind(nhanes1999.cln, nhanes2001.cln, nhanes2003.cln, nhanes2005.cln, nhanes2007.cln, nhanes2009.cln, nhanes2011.cln)
+
+#get rid of excess dataframes
+#I personally like having a less cluttered Environment
+#remove datafile and year subsets
+rm(chl.05, chl.07, chl.09, chl.11, demo.01,demo.03, demo.05, demo.07, demo.09, demo.11, demo.99, hepc.05, hepc.07, hepc.09, hepc.11, hiq.01,hiq.03,hiq.05, hiq.07, hiq.09, hiq.11, hiq.99, hiv.05, hiv.07, hiv.09, hiv.11, hsv.05, hsv.07, hsv.09, hsv.11, huq.01, huq.03, huq.05, huq.07, huq.09, huq.11, huq.99, lab2.01, lab2.03, lab2.99, lab3.01, lab3.03, lab3.99, lab5.01, lab5.03, lab5.99, lab9.99, lab9.03, lab9.01, sxq.01, sxq.03, sxq.05, sxq.07, sxq.09, sxq.11, sxq.99, hsq.11, hsq.09, hsq.07, hsq.05, hsq.03, hsq.01, ocq.11, ocq.09, ocq.07, ocq.05, ocq.03, ocq.01, ocq.99)
+#remove year subsets
+#rm(nhanes1999, nhanes1999.cln, nhanes2001, nhanes2001.cln, nhanes2003, nhanes2003.cln, nhanes2005, nhanes2005.cln, nhanes2007, nhanes2007.cln, nhanes2009, nhanes2009.cln, nhanes2011, nhanes2011.cln)
+count(nhn.total.cln)
+
+```
+
+```{r exclusions, include=FALSE}
+#restricted to age group 20-49
+nhanes.df1 <- nhn.total.cln %>%
+  filter(RIDAGEYR>=20)%>%
+  filter(RIDAGEYR<=49) 
+
+#I GOT THE N VALUE HECK YES 
+#n=19,510
+count(nhanes.df1)
+
+```
+
+```{r recoding, echo=FALSE}
+#changing data types,recoding and renaming variables
+nhanes.recoded<- nhanes.df1 %>%
+  mutate(RIDRETH1= recode(RIDRETH1,
+                          `2`=1))%>% #collapsing (Other Hisp, Mex Amer) to Hisp
+  mutate(RIDRETH1 = recode_factor(.x=RIDRETH1,
+                                  `1`= 'Hispanic',
+                                  `3`= 'White',
+                                  `4`='African American',
+                                  `5` = 'Mixed, other'))%>%
+  mutate(RIAGENDR= recode_factor(.x=RIAGENDR,
+                                 `1`='Male',
+                                 `2`='Female')) %>%
+  mutate(DMDEDUC2= recode_factor(.x=DMDEDUC2,
+                                 `1`='<9th',
+                                 `2`= '9th to 11th',
+                                 `3`= 'HS grad/GED',
+                                 `4`= 'Some College/AA',
+                                 `5`= 'College Grad or above',
+                                 `7`=NA_character_,
+                                 `9`=NA_character_))%>%
+  mutate(INDFMINC= recode(INDFMINC,                #VERSION 1: >20k, <20k, this version was statistically signf
+                          `1`=13, #$0 to $4999     #where the other version (w/all levels) is not
+                          `2`=13, #5k to 9999
+                          `3`=13, #10k to 14999
+                          `4`=13, #15k to 19999
+                          `5`=12, #20k to 24999
+                          `6`=12, #25k to 34999
+                          `7`=12, #35k to 44999
+                          `8`=12, #45k to 54999
+                          `9`=12, #55k to 64999
+                          `10`=12, #65k to 74999
+                          `11`=12))%>%  #75k and over
+  mutate(INDFMINC= recode_factor(.x=INDFMINC,              
+                                 `12`='Over 20k',
+                                 `13`='Under 20k',
+                                 `77`=NA_character_,
+                                 `99`=NA_character_))%>%
+  mutate(DMDMARTL= recode_factor(.x=DMDMARTL,
+                                 `1`='Married',
+                                 `2`='Widowed',
+                                 `3`='Divorced',
+                                 `4`='Separated',
+                                 `5`='Never Married',
+                                 `6`='Living with partner',
+                                 `77`=NA_character_,
+                                 `99`=NA_character_))%>%
+  mutate(DMDBORN4= recode_factor(.x=DMDBORN4,
+                                 `1`='Born in States or DC',
+                                 `2`='Others',
+                                 `77`=NA_character_,
+                                 `99`=NA_character_))%>%
+  mutate(HID010= recode_factor(.x=HID010,
+                               `1`='Yes',
+                               `2`='No',
+                               `7`=NA_character_,
+                               `9`=NA_character_))%>%
+  mutate(HUQ030= recode(HUQ030,
+                        `3`=1))%>%   #REG HC PLACE: 'More than one' and 'Yes' recoded to 'Yes'
+  mutate(HUQ030= recode_factor(.x=HUQ030,
+                               `1`='Yes',
+                               `2`='No',
+                               `7`=NA_character_,
+                               `9`=NA_character_))%>%
+  #mutate(HUQ030= recode_factor(.x=HUQ030,  #original REG HC PLACE var coding
+   #                            `1`='Yes',
+    #                           `2`='There is no place',
+     #                          `3`='There is more than one place',
+      #                         `7`=NA_character_,
+       #                        `9`=NA_character_))%>%
+  mutate(OCD150= recode_factor(.x=OCD150,
+                               `1`='Working at job or business',
+                               `2`='With a job or business, but not at work',
+                               `3`='Looking for work',
+                               `4`='Not working at a job or business',
+                               `7`=NA_character_,
+                               `9`=NA_character_))%>%
+  mutate(HSQ590= recode_factor(.x=HSQ590,
+                               `1`='Yes',
+                               `2`='No',
+                               `7`=NA_character_,
+                               `9`=NA_character_))%>%
+
+  mutate(SXQ260= recode_factor(.x=SXQ260,
+                               `1`= 'Yes',
+                               `2`='No',
+                               `7`=NA_character_,
+                               `9`=NA_character_))%>%
+  mutate(SXQ265= recode_factor(.x=SXQ265,
+                               `1`= 'Yes',
+                               `2`='No',
+                               `7`=NA_character_,
+                               `9`=NA_character_))%>%
+  mutate(SXQ270= recode_factor(.x=SXQ270,
+                               `1`= 'Yes',
+                               `2`='No',
+                               `7`=NA_character_,
+                               `9`=NA_character_))%>%
+  mutate(SXQ272= recode_factor(.x=SXQ272,
+                               `1`= 'Yes',
+                               `2`='No',
+                               `7`=NA_character_,
+                               `9`=NA_character_))%>%    
+  mutate(LBDHCV= recode_factor(.x=LBDHCV,
+                               `1`='+',
+                               `2`='-',
+                               `3`=NA_character_))%>%  #indeterminant = 3 was turned into NA
+  mutate(LBDHI= recode_factor(.x=LBDHI,
+                               `1`='+',
+                               `2`='-',
+                               `3`=NA_character_))%>%  #indeterminant = 3 was turned into NA
+  mutate(LBXHE2= recode_factor(.x=LBXHE2,
+                               `1`='+',
+                               `2`='-',
+                               `3`=NA_character_))%>%  #indeterminant = 3 was turned into NA
+  mutate(URXUCL= recode_factor(.x=URXUCL,
+                               `1`='+',
+                               `2`='-',
+                               `3`=NA_character_))%>%  #indeterminant = 3 was turned into NA
+  rename(race.eth=RIDRETH1)%>%
+  rename(age=RIDAGEYR)%>%
+  rename(gend=RIAGENDR)%>%
+  rename(educ=DMDEDUC2)%>%
+  rename(fam.inc=INDFMINC)%>%
+  rename(marital=DMDMARTL)%>%
+  rename(birthpl=DMDBORN4)%>%
+  rename(h.insur=HID010)%>%
+  rename(reg.hplace=HUQ030)%>%
+  rename(occup=OCD150)%>%
+  rename(sr.hiv.test=HSQ590)%>%
+  rename(sr.gonorr=SXQ270)%>%
+  rename(sr.chlm=SXQ272)%>%
+  rename(sr.herp=SXQ260)%>%
+  rename(sr.gwarts=SXQ265)%>%
+  rename(hepc=LBDHCV)%>%
+  rename(hiv=LBDHI)%>%
+  rename(chlm=URXUCL)%>%
+  rename(herp2=LBXHE2)%>%
+  mutate(race.eth= fct_relevel(race.eth,            #releveled race.eth for prettiness in prevalence tables
+                               "African American",
+                               "Hispanic", 
+                               "White", 
+                               "Mixed, other"))%>%
+  mutate(WTMEC4YR = as.numeric(WTMEC4YR))%>%
+  mutate(WTMEC2YR = as.numeric(WTMEC2YR))
+
+#trying to create ever.sti
+
+#separate dataset to keep it small
+ever.sti.variable<- nhanes.df1 %>%
+  select(SEQN, SXQ260, SXQ265, SXQ272, SXQ270)%>%
+  add_column(ever.sti="")%>%
+  mutate(SXQ260= recode(SXQ260,
+                        `1`=100,
+                        `2`=1,
+                        `7`=NA_real_,
+                        `9`=NA_real_)) %>%
+   mutate(SXQ265= recode(SXQ265,
+                        `1`=100,
+                        `2`=1,
+                        `7`=NA_real_,
+                        `9`=NA_real_))%>%
+   mutate(SXQ272= recode(SXQ272,
+                        `1`=100,
+                        `2`=1,
+                        `7`=NA_real_,
+                        `9`=NA_real_))%>%
+   mutate(SXQ270= recode(SXQ270,
+                        `1`=100,
+                        `2`=1,
+                        `7`=NA_real_,
+                        `9`=NA_real_))%>%
+  mutate(ever.sti=SXQ270+SXQ272+SXQ265+SXQ260)%>%
+  mutate(ever.sti= cut(x=ever.sti,
+                       breaks = c(-Inf, 5, Inf),
+                       labels = c('No', 'Yes')))%>%
+  mutate(ever.sti= fct_relevel(ever.sti,
+                               "Yes",
+                               "No"))%>%
+  select(SEQN, ever.sti)
+
+#Example of how to do 523-554 in a much simpler fashion
+      #dataset$sti[dataset$q1 == 1 | dataset$q2 ==1 | dataset$q3 == 1] <- "Yes"
+      #dataset$eversti[dataset$q1 == 0 & dataset$q2 == 0 & dataset$q3 ==0] <- no
+
+
+#merging the bigger nhn.df2 with the dataset created for ever.sti
+nhanes.final <- nhanes.recoded %>%
+  full_join(ever.sti.variable, by= "SEQN")
+
+
+
+```
+
+```{r svydesign, echo=FALSE}
+#sample weight for aggregate data is MEC14YR
+#do not na.omit with survey data. you need the whole set for the weights to work
+svydsgn1 <- svydesign(data = nhanes.final,
+                     id=~SDMVPSU,
+                     strata = ~SDMVSTRA,
+                     weights = ~MEC14YR,
+                     nest=TRUE)
+#subset by age
+restr.age <- subset(svydsgn1,
+                        age>=20,
+                        age<=49,
+                        options(na.action = "na.pass"))
+
+#subset by gender
+nhn.all.male <- subset(restr.age, 
+                       gend=="Male",
+                       options(na.action = "na.pass"))
+nhn.all.fem <- subset(restr.age,
+                      gend=="Female", 
+                      options(na.action = "na.pass"))
+
+#subset by race
+nhn.m.aa <- subset(nhn.all.male,
+                   race.eth=="African American")
+nhn.m.h <- subset(nhn.all.male,
+                  race.eth=="Hispanic")
+nhn.m.w <- subset(nhn.all.male,
+                  race.eth=="White")
+nhn.m.mx <- subset(nhn.all.male,
+                   race.eth=="Mixed, other")
+
+nhn.f.aa <- subset(nhn.all.fem,
+                   race.eth=="African American")
+nhn.f.h <- subset(nhn.all.fem,
+                  race.eth=="Hispanic")
+nhn.f.w <- subset(nhn.all.fem,
+                  race.eth=="White")
+nhn.f.mx <- subset(nhn.all.fem,
+                   race.eth=="Mixed, other")
+
+
+```
+
+#Weighted Prevalence Male African American
+
+```{r w.prev male AA, echo=FALSE}
+#MALE
+#AFRICAN AMERICAN
+
+#HIV 
+#weighted prev w/granularity
+round(svymean(~hiv, nhn.m.aa, na.rm=TRUE), 4)*100
+#95%CI of weighted prev
+a<- svyciprop(~hiv=="+", nhn.m.aa, method = "lo", df=degf(nhn.m.aa))
+b<-svyciprop(~hiv=="-", nhn.m.aa, method = "lo", df=degf(nhn.m.aa))  #svyciprop cuts the decimal off at the 100th, which is only the 10th when rounding
+attr(a, "ci") #this fixes it
+attr(b, "ci")
+#chlm
+round(svymean(~chlm, nhn.m.aa, na.rm=TRUE), 4)*100
+c<-svyciprop(~chlm=="+", nhn.m.aa, method = "lo", df=degf(nhn.m.aa))
+d<-svyciprop(~chlm=="-", nhn.m.aa, method = "lo", df=degf(nhn.m.aa))
+attr(c, "ci")
+attr(d, "ci")
+#herp2/HSV2
+round(svymean(~herp2, nhn.m.aa, na.rm=TRUE), 4)*100
+e<-svyciprop(~herp2=="+", nhn.m.aa, method = "lo", df=degf(nhn.m.aa))
+f<-svyciprop(~herp2=="-", nhn.m.aa, method = "lo", df=degf(nhn.m.aa))
+attr(e, "ci")
+attr(f, "ci")
+#hepc
+round(svymean(~hepc, nhn.m.aa, na.rm=TRUE), 4)*100
+g<-svyciprop(~hepc=="+", nhn.m.aa, method = "lo", df=degf(nhn.m.aa))
+h<-svyciprop(~hepc=="-", nhn.m.aa, method = "lo", df=degf(nhn.m.aa))
+attr(g, "ci")
+attr(h, "ci")
+#ever.sti
+round(svymean(~ever.sti, nhn.m.aa, na.rm=TRUE), 4)*100
+i<-svyciprop(~ever.sti=="Yes", nhn.m.aa, method = "lo", df=degf(nhn.m.aa))
+j<-svyciprop(~ever.sti=="No", nhn.m.aa, method = "lo", df=degf(nhn.m.aa))
+attr(i, "ci")
+attr(j, "ci")
+#sr.gonorr
+round(svymean(~sr.gonorr, nhn.m.aa, na.rm=TRUE), 4)*100
+k<-svyciprop(~sr.gonorr=="Yes", nhn.m.aa, method = "lo", df=degf(nhn.m.aa))
+l<-svyciprop(~sr.gonorr=="No", nhn.m.aa, method = "lo", df=degf(nhn.m.aa))
+attr(k, "ci")
+attr(l, "ci")
+#sr.chlm
+round(svymean(~sr.chlm, nhn.m.aa, na.rm=TRUE), 4)*100
+m<-svyciprop(~sr.chlm=="Yes", nhn.m.aa, method = "lo", df=degf(nhn.m.aa))
+n<-svyciprop(~sr.chlm=="No", nhn.m.aa, method = "lo", df=degf(nhn.m.aa))
+attr(m, "ci")
+attr(n, "ci")
+#sr.herp
+round(svymean(~sr.herp, nhn.m.aa, na.rm=TRUE), 4)*100
+o<-svyciprop(~sr.herp=="Yes", nhn.m.aa, method = "lo", df=degf(nhn.m.aa))
+p<-svyciprop(~sr.herp=="No", nhn.m.aa, method = "lo", df=degf(nhn.m.aa))
+attr(o, "ci")
+attr(p, "ci")
+#sr.gwarts
+round(svymean(~sr.gwarts, nhn.m.aa, na.rm=TRUE), 4)*100
+q<-svyciprop(~sr.gwarts=="Yes", nhn.m.aa, method = "lo", df=degf(nhn.m.aa))
+r<-svyciprop(~sr.gwarts=="No", nhn.m.aa, method = "lo", df=degf(nhn.m.aa))
+attr(q, "ci")
+attr(r, "ci")
+#sr.hiv.test
+round(svymean(~sr.hiv.test, nhn.m.aa, na.rm=TRUE), 4)*100
+s<-svyciprop(~sr.hiv.test=="Yes", nhn.m.aa, method = "lo", df=degf(nhn.m.aa))
+t<-svyciprop(~sr.hiv.test=="No", nhn.m.aa, method = "lo", df=degf(nhn.m.aa))
+attr(s, "ci")
+attr(t, "ci")
+
+```
+#Weighted Prevalence Male Hispanic
+```{r w.prev male hisp, echo=FALSE}
+#MALE
+#HISPANIC
+
+#HIV 
+#weighted prev w/granularity
+round(svymean(~hiv, nhn.m.h, na.rm=TRUE), 4)*100
+#95%CI of weighted prev
+a2<-svyciprop(~hiv=="+", nhn.m.h, method = "lo", df=degf(nhn.m.h))
+b2<-svyciprop(~hiv=="-", nhn.m.h, method = "lo", df=degf(nhn.m.h))  
+attr(a2, "ci")
+attr(b2, "ci")
+#chlm
+round(svymean(~chlm, nhn.m.h, na.rm=TRUE), 4)*100
+c2<-svyciprop(~chlm=="+", nhn.m.h, method = "lo", df=degf(nhn.m.h))
+d2<-svyciprop(~chlm=="-", nhn.m.h, method = "lo", df=degf(nhn.m.h))
+attr(c2, "ci")
+attr(d2, "ci")
+#herp2/HSV2
+round(svymean(~herp2, nhn.m.h, na.rm=TRUE), 4)*100
+e2<-svyciprop(~herp2=="+", nhn.m.h, method = "lo", df=degf(nhn.m.h))
+f2<-svyciprop(~herp2=="-", nhn.m.h, method = "lo", df=degf(nhn.m.h))
+attr(e2, "ci")
+attr(f2, "ci")
+#hepc
+round(svymean(~hepc, nhn.m.h, na.rm=TRUE), 4)*100
+g2<-svyciprop(~hepc=="+", nhn.m.h, method = "lo", df=degf(nhn.m.h))
+h2<-svyciprop(~hepc=="-", nhn.m.h, method = "lo", df=degf(nhn.m.h))
+attr(g2, "ci")
+attr(h2, "ci")
+#ever.sti
+round(svymean(~ever.sti, nhn.m.h, na.rm=TRUE), 4)*100
+i2<-svyciprop(~ever.sti=="Yes", nhn.m.h, method = "lo", df=degf(nhn.m.h))
+j2<-svyciprop(~ever.sti=="No", nhn.m.h, method = "lo", df=degf(nhn.m.h))
+attr(i2, "ci")
+attr(j2, "ci")
+#sr.gonorr
+round(svymean(~sr.gonorr, nhn.m.h, na.rm=TRUE), 4)*100
+k2<-svyciprop(~sr.gonorr=="Yes", nhn.m.h, method = "lo", df=degf(nhn.m.h))
+l2<-svyciprop(~sr.gonorr=="No", nhn.m.h, method = "lo", df=degf(nhn.m.h))
+attr(k2, "ci")
+attr(l2, "ci")
+#sr.chlm
+round(svymean(~sr.chlm, nhn.m.h, na.rm=TRUE), 4)*100
+m2<-svyciprop(~sr.chlm=="Yes", nhn.m.h, method = "lo", df=degf(nhn.m.h))
+n2<-svyciprop(~sr.chlm=="No", nhn.m.h, method = "lo", df=degf(nhn.m.h))
+attr(m2, "ci")
+attr(n2, "ci")
+#sr.herp
+round(svymean(~sr.herp, nhn.m.h, na.rm=TRUE), 4)*100
+o2<-svyciprop(~sr.herp=="Yes", nhn.m.h, method = "lo", df=degf(nhn.m.h))
+p2<-svyciprop(~sr.herp=="No", nhn.m.h, method = "lo", df=degf(nhn.m.h))
+attr(o2, "ci")
+attr(p2, "ci")
+#sr.gwarts
+round(svymean(~sr.gwarts, nhn.m.h, na.rm=TRUE), 4)*100
+q2<-svyciprop(~sr.gwarts=="Yes", nhn.m.h, method = "lo", df=degf(nhn.m.h))
+r2<-svyciprop(~sr.gwarts=="No", nhn.m.h, method = "lo", df=degf(nhn.m.h))
+attr(q2, "ci")
+attr(r2, "ci")
+#sr.hiv.test
+round(svymean(~sr.hiv.test, nhn.m.h, na.rm=TRUE), 4)*100
+s2<-svyciprop(~sr.hiv.test=="Yes", nhn.m.h, method = "lo", df=degf(nhn.m.h))
+t2<-svyciprop(~sr.hiv.test=="No", nhn.m.h, method = "lo", df=degf(nhn.m.h))
+attr(s2, "ci")
+attr(t2, "ci")
+```
+#Weighted Prevalence Male White
+```{r w.prev male white, echo=FALSE}
+#MALE
+#WHITE
+
+#HIV 
+#weighted prev w/granularity
+round(svymean(~hiv, nhn.m.w, na.rm=TRUE), 4)*100
+#95%CI of weighted prev
+a3 <- svyciprop(~hiv=="+", nhn.m.w, method = "lo", df=degf(nhn.m.w))
+b3<-svyciprop(~hiv=="-", nhn.m.w, method = "lo", df=degf(nhn.m.w))  
+attr(a3, "ci")
+attr(b3, "ci")
+#chlm
+round(svymean(~chlm, nhn.m.w, na.rm=TRUE), 4)*100
+c3<-svyciprop(~chlm=="+", nhn.m.w, method = "lo", df=degf(nhn.m.w))
+d3<-svyciprop(~chlm=="-", nhn.m.w, method = "lo", df=degf(nhn.m.w))
+attr(c3, "ci")
+attr(d3, "ci")
+#herp2/HSV2
+round(svymean(~herp2, nhn.m.w, na.rm=TRUE), 4)*100
+e3<-svyciprop(~herp2=="+", nhn.m.w, method = "lo", df=degf(nhn.m.w))
+f3<-svyciprop(~herp2=="-", nhn.m.w, method = "lo", df=degf(nhn.m.w))
+attr(e3, "ci")
+attr(f3, "ci")
+#hepc
+round(svymean(~hepc, nhn.m.w, na.rm=TRUE), 4)*100
+g3<-svyciprop(~hepc=="+", nhn.m.w, method = "lo", df=degf(nhn.m.w))
+h3<-svyciprop(~hepc=="-", nhn.m.w, method = "lo", df=degf(nhn.m.w))
+attr(g3, "ci")
+attr(h3, "ci")
+#ever.sti
+round(svymean(~ever.sti, nhn.m.w, na.rm=TRUE), 4)*100
+i3<-svyciprop(~ever.sti=="Yes", nhn.m.w, method = "lo", df=degf(nhn.m.w))
+j3<-svyciprop(~ever.sti=="No", nhn.m.w, method = "lo", df=degf(nhn.m.w))
+attr(i3, "ci")
+attr(j3, "ci")
+#sr.gonorr
+round(svymean(~sr.gonorr, nhn.m.w, na.rm=TRUE), 4)*100
+k3<-svyciprop(~sr.gonorr=="Yes", nhn.m.w, method = "lo", df=degf(nhn.m.w))
+l3<-svyciprop(~sr.gonorr=="No", nhn.m.w, method = "lo", df=degf(nhn.m.w))
+attr(k3, "ci")
+attr(l3, "ci")
+#sr.chlm
+round(svymean(~sr.chlm, nhn.m.w, na.rm=TRUE), 4)*100
+m3<-svyciprop(~sr.chlm=="Yes", nhn.m.w, method = "lo", df=degf(nhn.m.w))
+n3<-svyciprop(~sr.chlm=="No", nhn.m.w, method = "lo", df=degf(nhn.m.w))
+attr(m3, "ci")
+attr(n3, "ci")
+#sr.herp
+round(svymean(~sr.herp, nhn.m.w, na.rm=TRUE), 4)*100
+o3<-svyciprop(~sr.herp=="Yes", nhn.m.w, method = "lo", df=degf(nhn.m.w))
+p3<-svyciprop(~sr.herp=="No", nhn.m.w, method = "lo", df=degf(nhn.m.w))
+attr(o3, "ci")
+attr(p3, "ci")
+#sr.gwarts
+round(svymean(~sr.gwarts, nhn.m.w, na.rm=TRUE), 4)*100
+q3<-svyciprop(~sr.gwarts=="Yes", nhn.m.w, method = "lo", df=degf(nhn.m.w))
+r3<-svyciprop(~sr.gwarts=="No", nhn.m.w, method = "lo", df=degf(nhn.m.w))
+attr(q3, "ci")
+attr(r3, "ci")
+#sr.hiv.test
+round(svymean(~sr.hiv.test, nhn.m.w, na.rm=TRUE), 4)*100
+s3<-svyciprop(~sr.hiv.test=="Yes", nhn.m.w, method = "lo", df=degf(nhn.m.w))
+t3<-svyciprop(~sr.hiv.test=="No", nhn.m.w, method = "lo", df=degf(nhn.m.w))
+attr(s3, "ci")
+attr(t3, "ci")
+
+```
+#Weighted Prevalence Male Mixed, Other
+
+```{r w.prev male mixed other, echo=FALSE}
+#MALE
+#MIXED, OTHER
+
+#HIV 
+#weighted prev w/granularity
+round(svymean(~hiv, nhn.m.mx, na.rm=TRUE), 4)*100
+#95%CI of weighted prev
+a4<-svyciprop(~hiv=="+", nhn.m.mx, method = "lo", df=degf(nhn.m.mx))
+b4<-svyciprop(~hiv=="-", nhn.m.mx, method = "lo", df=degf(nhn.m.mx))  
+attr(a4, "ci")
+attr(b4, "ci")
+#chlm
+round(svymean(~chlm, nhn.m.mx, na.rm=TRUE), 4)*100
+c4<-svyciprop(~chlm=="+", nhn.m.mx, method = "lo", df=degf(nhn.m.mx))
+d4<-svyciprop(~chlm=="-", nhn.m.mx, method = "lo", df=degf(nhn.m.mx))
+attr(c4, "ci")
+attr(d4, "ci")
+#herp2/HSV2
+round(svymean(~herp2, nhn.m.mx, na.rm=TRUE), 4)*100
+e4<-svyciprop(~herp2=="+", nhn.m.mx, method = "lo", df=degf(nhn.m.mx))
+f4<-svyciprop(~herp2=="-", nhn.m.mx, method = "lo", df=degf(nhn.m.mx))
+attr(e4, "ci")
+attr(f4, "ci")
+#hepc
+round(svymean(~hepc, nhn.m.mx, na.rm=TRUE), 4)*100
+g4<-svyciprop(~hepc=="+", nhn.m.mx, method = "lo", df=degf(nhn.m.mx))
+h4<-svyciprop(~hepc=="-", nhn.m.mx, method = "lo", df=degf(nhn.m.mx))
+attr(g4, "ci")
+attr(h4, "ci")
+#ever.sti
+round(svymean(~ever.sti, nhn.m.mx, na.rm=TRUE), 4)*100
+i4<-svyciprop(~ever.sti=="Yes", nhn.m.mx, method = "lo", df=degf(nhn.m.mx))
+j4<-svyciprop(~ever.sti=="No", nhn.m.mx, method = "lo", df=degf(nhn.m.mx))
+attr(i4, "ci")
+attr(j4, "ci")
+#sr.gonorr
+round(svymean(~sr.gonorr, nhn.m.mx, na.rm=TRUE), 4)*100
+k4<-svyciprop(~sr.gonorr=="Yes", nhn.m.mx, method = "lo", df=degf(nhn.m.mx))
+l4<-svyciprop(~sr.gonorr=="No", nhn.m.mx, method = "lo", df=degf(nhn.m.mx))
+attr(k4, "ci")
+attr(l4, "ci")
+#sr.chlm
+round(svymean(~sr.chlm, nhn.m.mx, na.rm=TRUE), 4)*100
+m4<-svyciprop(~sr.chlm=="Yes", nhn.m.mx, method = "lo", df=degf(nhn.m.mx))
+n4<-svyciprop(~sr.chlm=="No", nhn.m.mx, method = "lo", df=degf(nhn.m.mx))
+attr(m4, "ci")
+attr(n4, "ci")
+#sr.herp
+round(svymean(~sr.herp, nhn.m.mx, na.rm=TRUE), 4)*100
+o4<-svyciprop(~sr.herp=="Yes", nhn.m.mx, method = "lo", df=degf(nhn.m.mx))
+p4<-svyciprop(~sr.herp=="No", nhn.m.mx, method = "lo", df=degf(nhn.m.mx))
+attr(o4, "ci")
+attr(p4, "ci")
+#sr.gwarts
+round(svymean(~sr.gwarts, nhn.m.mx, na.rm=TRUE), 4)*100
+q4<-svyciprop(~sr.gwarts=="Yes", nhn.m.mx, method = "lo", df=degf(nhn.m.mx))
+r4<-svyciprop(~sr.gwarts=="No", nhn.m.mx, method = "lo", df=degf(nhn.m.mx))
+attr(q4, "ci")
+attr(r4, "ci")
+#sr.hiv.test
+round(svymean(~sr.hiv.test, nhn.m.mx, na.rm=TRUE), 4)*100
+s4<-svyciprop(~sr.hiv.test=="Yes", nhn.m.mx, method = "lo", df=degf(nhn.m.mx))
+t4<-svyciprop(~sr.hiv.test=="No", nhn.m.mx, method = "lo", df=degf(nhn.m.mx))
+attr(s4, "ci")
+attr(t4, "ci")
+
+```
+
+# Chi-Square for Signficance of Difference Between Race/Ethnicity Groups
+```{r chisq male w.prev X races, echo=FALSE}
+#here's how to get the chi-sq tests for diff x groups
+#MALE
+#hiv
+svychisq(~hiv+race.eth, design=nhn.all.male,statistic=c("Chisq"), na.rm=TRUE)
+#chlm
+svychisq(~chlm+race.eth, design=nhn.all.male,statistic=c("Chisq"), na.rm=TRUE)
+#herp2
+svychisq(~herp2+race.eth, design=nhn.all.male,statistic=c("Chisq"), na.rm=TRUE)
+#hepc
+svychisq(~hepc+race.eth, design=nhn.all.male,statistic=c("Chisq"), na.rm=TRUE)
+#ever.sti
+svychisq(~ever.sti+race.eth, design=nhn.all.male,statistic=c("Chisq"), na.rm=TRUE)
+#sr.gonorr
+svychisq(~sr.gonorr+race.eth, design=nhn.all.male,statistic=c("Chisq"), na.rm=TRUE)
+#sr.chlm
+svychisq(~sr.chlm+race.eth, design=nhn.all.male,statistic=c("Chisq"), na.rm=TRUE)
+#sr.herp
+svychisq(~sr.herp+race.eth, design=nhn.all.male,statistic=c("Chisq"), na.rm=TRUE)
+#sr.gwarts
+svychisq(~sr.gwarts+race.eth, design=nhn.all.male,statistic=c("Chisq"), na.rm=TRUE)
+#sr.hiv.test
+svychisq(~sr.hiv.test+race.eth, design=nhn.all.male,statistic=c("Chisq"), na.rm=TRUE)
+
+```
+
+#Weighted Prevalence Female African American
+
+```{r w.prev fem AA, echo=FALSE}
+#FEMALE
+#AFRICAN AMERICAN
+
+#HIV 
+#weighted prev w/granularity
+round(svymean(~hiv, nhn.f.aa, na.rm=TRUE), 4)*100
+#95%CI of weighted prev
+a.1<-svyciprop(~hiv=="+", nhn.f.aa, method = "lo", df=degf(nhn.f.aa))
+b.1<-svyciprop(~hiv=="-", nhn.f.aa, method = "lo", df=degf(nhn.f.aa))  
+attr(a.1, "ci")
+attr(b.1, "ci")
+#chlm
+round(svymean(~chlm, nhn.f.aa, na.rm=TRUE), 4)*100
+c.1<-svyciprop(~chlm=="+", nhn.f.aa, method = "lo", df=degf(nhn.f.aa))
+d.1<-svyciprop(~chlm=="-", nhn.f.aa, method = "lo", df=degf(nhn.f.aa))
+attr(c.1, "ci")
+attr(d.1, "ci")
+#herp2/HSV2
+round(svymean(~herp2, nhn.f.aa, na.rm=TRUE), 4)*100
+e.1<-svyciprop(~herp2=="+", nhn.f.aa, method = "lo", df=degf(nhn.f.aa))
+f.1<-svyciprop(~herp2=="-", nhn.f.aa, method = "lo", df=degf(nhn.f.aa))
+attr(e.1, "ci")
+attr(f.1, "ci")
+#hepc
+round(svymean(~hepc, nhn.f.aa, na.rm=TRUE), 4)*100
+g.1<-svyciprop(~hepc=="+", nhn.f.aa, method = "lo", df=degf(nhn.f.aa))
+h.1<-svyciprop(~hepc=="-", nhn.f.aa, method = "lo", df=degf(nhn.f.aa))
+attr(g.1, "ci")
+attr(h.1, "ci")
+#ever.sti
+round(svymean(~ever.sti, nhn.f.aa, na.rm=TRUE), 4)*100
+i.1<-svyciprop(~ever.sti=="Yes", nhn.f.aa, method = "lo", df=degf(nhn.f.aa))
+j.1<-svyciprop(~ever.sti=="No", nhn.f.aa, method = "lo", df=degf(nhn.f.aa))
+attr(i.1, "ci")
+attr(j.1, "ci")
+#sr.gonorr
+round(svymean(~sr.gonorr, nhn.f.aa, na.rm=TRUE), 4)*100
+k.1<-svyciprop(~sr.gonorr=="Yes", nhn.f.aa, method = "lo", df=degf(nhn.f.aa))
+l.1<-svyciprop(~sr.gonorr=="No", nhn.f.aa, method = "lo", df=degf(nhn.f.aa))
+attr(k.1, "ci")
+attr(l.1, "ci")
+#sr.chlm
+round(svymean(~sr.chlm, nhn.f.aa, na.rm=TRUE), 4)*100
+m.1<-svyciprop(~sr.chlm=="Yes", nhn.f.aa, method = "lo", df=degf(nhn.f.aa))
+n.1<-svyciprop(~sr.chlm=="No", nhn.f.aa, method = "lo", df=degf(nhn.f.aa))
+attr(m.1, "ci")
+attr(n.1, "ci")
+#sr.herp
+round(svymean(~sr.herp, nhn.f.aa, na.rm=TRUE), 4)*100
+o.1<-svyciprop(~sr.herp=="Yes", nhn.f.aa, method = "lo", df=degf(nhn.f.aa))
+p.1<-svyciprop(~sr.herp=="No", nhn.f.aa, method = "lo", df=degf(nhn.f.aa))
+attr(o.1, "ci")
+attr(p.1, "ci")
+#sr.gwarts
+round(svymean(~sr.gwarts, nhn.f.aa, na.rm=TRUE), 4)*100
+q.1<-svyciprop(~sr.gwarts=="Yes", nhn.f.aa, method = "lo", df=degf(nhn.f.aa))
+r.1<-svyciprop(~sr.gwarts=="No", nhn.f.aa, method = "lo", df=degf(nhn.f.aa))
+attr(q.1, "ci")
+attr(r.1, "ci")
+#sr.hiv.test
+round(svymean(~sr.hiv.test, nhn.f.aa, na.rm=TRUE), 4)*100
+s.1<-svyciprop(~sr.hiv.test=="Yes", nhn.f.aa, method = "lo", df=degf(nhn.f.aa))
+t.1<-svyciprop(~sr.hiv.test=="No", nhn.f.aa, method = "lo", df=degf(nhn.f.aa))
+attr(s.1, "ci")
+attr(t.1, "ci")
+
+```
+
+#Weighted Prevalence Female Hispanic
+
+```{r w.prev fem hisp, echo=FALSE}
+#FEMALE
+#HISPANIC
+
+#HIV 
+#weighted prev w/granularity
+round(svymean(~hiv, nhn.f.h, na.rm=TRUE), 4)*100
+#95%CI of weighted prev
+a.2<-svyciprop(~hiv=="+", nhn.f.h, method = "lo", df=degf(nhn.f.h))
+b.2<-svyciprop(~hiv=="-", nhn.f.h, method = "lo", df=degf(nhn.f.h))
+attr(a.2, "ci")
+attr(b.2, "ci")
+#chlm
+round(svymean(~chlm, nhn.f.h, na.rm=TRUE), 4)*100
+c.2<-svyciprop(~chlm=="+", nhn.f.h, method = "lo", df=degf(nhn.f.h))
+d.2<-svyciprop(~chlm=="-", nhn.f.h, method = "lo", df=degf(nhn.f.h))
+attr(c.2, "ci")
+attr(d.2, "ci")
+#herp2/HSV2
+round(svymean(~herp2, nhn.f.h, na.rm=TRUE), 4)*100
+e.2<-svyciprop(~herp2=="+", nhn.f.h, method = "lo", df=degf(nhn.f.h))
+f.2<-svyciprop(~herp2=="-", nhn.f.h, method = "lo", df=degf(nhn.f.h))
+attr(e.2, "ci")
+attr(f.2, "ci")
+#hepc
+round(svymean(~hepc, nhn.f.h, na.rm=TRUE), 4)*100
+g.2<-svyciprop(~hepc=="+", nhn.f.h, method = "lo", df=degf(nhn.f.h))
+h.2<-svyciprop(~hepc=="-", nhn.f.h, method = "lo", df=degf(nhn.f.h))
+attr(g.2, "ci")
+attr(h.2, "ci")
+#ever.sti
+round(svymean(~ever.sti, nhn.f.h, na.rm=TRUE), 4)*100
+i.2<-svyciprop(~ever.sti=="Yes", nhn.f.h, method = "lo", df=degf(nhn.f.h))
+j.2<-svyciprop(~ever.sti=="No", nhn.f.h, method = "lo", df=degf(nhn.f.h))
+attr(i.2, "ci")
+attr(j.2, "ci")
+#sr.gonorr
+round(svymean(~sr.gonorr, nhn.f.h, na.rm=TRUE), 4)*100
+k.2<-svyciprop(~sr.gonorr=="Yes", nhn.f.h, method = "lo", df=degf(nhn.f.h))
+l.2<-svyciprop(~sr.gonorr=="No", nhn.f.h, method = "lo", df=degf(nhn.f.h))
+attr(k.2, "ci")
+attr(l.2, "ci")
+#sr.chlm
+round(svymean(~sr.chlm, nhn.f.h, na.rm=TRUE), 4)*100
+m.2<-svyciprop(~sr.chlm=="Yes", nhn.f.h, method = "lo", df=degf(nhn.f.h))
+n.2<-svyciprop(~sr.chlm=="No", nhn.f.h, method = "lo", df=degf(nhn.f.h))
+attr(m.2, "ci")
+attr(n.2, "ci")
+#sr.herp
+round(svymean(~sr.herp, nhn.f.h, na.rm=TRUE), 4)*100
+o.2<-svyciprop(~sr.herp=="Yes", nhn.f.h, method = "lo", df=degf(nhn.f.h))
+p.2<-svyciprop(~sr.herp=="No", nhn.f.h, method = "lo", df=degf(nhn.f.h))
+attr(o.2, "ci")
+attr(p.2, "ci")
+#sr.gwarts
+round(svymean(~sr.gwarts, nhn.f.h, na.rm=TRUE), 4)*100
+q.2<-svyciprop(~sr.gwarts=="Yes", nhn.f.h, method = "lo", df=degf(nhn.f.h))
+r.2<-svyciprop(~sr.gwarts=="No", nhn.f.h, method = "lo", df=degf(nhn.f.h))
+attr(q.2, "ci")
+attr(r.2, "ci")
+#sr.hiv.test
+round(svymean(~sr.hiv.test, nhn.f.h, na.rm=TRUE), 4)*100
+s.2<-svyciprop(~sr.hiv.test=="Yes", nhn.f.h, method = "lo", df=degf(nhn.f.h))
+t.2<-svyciprop(~sr.hiv.test=="No", nhn.f.h, method = "lo", df=degf(nhn.f.h))
+attr(s.2, "ci")
+attr(t.2, "ci")
+
+```
+
+#Weighted Prevalence Female White
+
+```{r w.prev fem white, echo=FALSE}
+#FEMALE
+#WHITE
+
+#HIV 
+#weighted prev w/granularity
+round(svymean(~hiv, nhn.f.w, na.rm=TRUE), 4)*100
+#95%CI of weighted prev
+a.3<-svyciprop(~hiv=="+", nhn.f.w, method = "lo", df=degf(nhn.f.w))
+b.3<-svyciprop(~hiv=="-", nhn.f.w, method = "lo", df=degf(nhn.f.w))  
+attr(a.3, "ci")
+attr(b.3, "ci")
+#chlm
+round(svymean(~chlm, nhn.f.w, na.rm=TRUE), 4)*100
+c.3<-svyciprop(~chlm=="+", nhn.f.w, method = "lo", df=degf(nhn.f.w))
+d.3<-svyciprop(~chlm=="-", nhn.f.w, method = "lo", df=degf(nhn.f.w))
+attr(c.3, "ci")
+attr(d.3, "ci")
+#herp2/HSV2
+round(svymean(~herp2, nhn.f.w, na.rm=TRUE), 4)*100
+e.3<-svyciprop(~herp2=="+", nhn.f.w, method = "lo", df=degf(nhn.f.w))
+f.3<-svyciprop(~herp2=="-", nhn.f.w, method = "lo", df=degf(nhn.f.w))
+attr(e.3, "ci")
+attr(f.3, "ci")
+#hepc
+round(svymean(~hepc, nhn.f.w, na.rm=TRUE), 4)*100
+g.3<-svyciprop(~hepc=="+", nhn.f.w, method = "lo", df=degf(nhn.f.w))
+h.3<-svyciprop(~hepc=="-", nhn.f.w, method = "lo", df=degf(nhn.f.w))
+attr(g.3, "ci")
+attr(h.3, "ci")
+#ever.sti
+round(svymean(~ever.sti, nhn.f.w, na.rm=TRUE), 4)*100
+i.3<-svyciprop(~ever.sti=="Yes", nhn.f.w, method = "lo", df=degf(nhn.f.w))
+j.3<-svyciprop(~ever.sti=="No", nhn.f.w, method = "lo", df=degf(nhn.f.w))
+attr(i.3, "ci")
+attr(j.3, "ci")
+#sr.gonorr
+round(svymean(~sr.gonorr, nhn.f.w, na.rm=TRUE), 4)*100
+k.3<-svyciprop(~sr.gonorr=="Yes", nhn.f.w, method = "lo", df=degf(nhn.f.w))
+l.3<-svyciprop(~sr.gonorr=="No", nhn.f.w, method = "lo", df=degf(nhn.f.w))
+attr(k.3, "ci")
+attr(l.3, "ci")
+#sr.chlm
+round(svymean(~sr.chlm, nhn.f.w, na.rm=TRUE), 4)*100
+m.3<-svyciprop(~sr.chlm=="Yes", nhn.f.w, method = "lo", df=degf(nhn.f.w))
+n.3<-svyciprop(~sr.chlm=="No", nhn.f.w, method = "lo", df=degf(nhn.f.w))
+attr(m.3, "ci")
+attr(n.3, "ci")
+#sr.herp
+round(svymean(~sr.herp, nhn.f.w, na.rm=TRUE), 4)*100
+o.3<-svyciprop(~sr.herp=="Yes", nhn.f.w, method = "lo", df=degf(nhn.f.w))
+p.3<-svyciprop(~sr.herp=="No", nhn.f.w, method = "lo", df=degf(nhn.f.w))
+attr(o.3, "ci")
+attr(p.3, "ci")
+#sr.gwarts
+round(svymean(~sr.gwarts, nhn.f.w, na.rm=TRUE), 4)*100
+q.3<-svyciprop(~sr.gwarts=="Yes", nhn.f.w, method = "lo", df=degf(nhn.f.w))
+r.3<-svyciprop(~sr.gwarts=="No", nhn.f.w, method = "lo", df=degf(nhn.f.w))
+attr(q.3, "ci")
+attr(r.3, "ci")
+#sr.hiv.test
+round(svymean(~sr.hiv.test, nhn.f.w, na.rm=TRUE), 4)*100
+s.3<-svyciprop(~sr.hiv.test=="Yes", nhn.f.w, method = "lo", df=degf(nhn.f.w))
+t.3<-svyciprop(~sr.hiv.test=="No", nhn.f.w, method = "lo", df=degf(nhn.f.w))
+attr(s.3, "ci")
+attr(t.3, "ci")
+
+```
+
+#Weighted Prevalence Female Mixed, Other
+
+```{r w.prev fem mixed other, echo=FALSE}
+#FEMALE
+#MIXED, OTHER
+
+#HIV 
+#weighted prev w/granularity
+round(svymean(~hiv, nhn.f.mx, na.rm=TRUE), 4)*100
+#95%CI of weighted prev
+a.4<-svyciprop(~hiv=="+", nhn.f.mx, method = "lo", df=degf(nhn.f.mx))
+b.4<-svyciprop(~hiv=="-", nhn.f.mx, method = "lo", df=degf(nhn.f.mx))  
+attr(a.4, "ci")
+attr(b.4, "ci")
+#chlm
+round(svymean(~chlm, nhn.f.mx, na.rm=TRUE), 4)*100
+c.4<-svyciprop(~chlm=="+", nhn.f.mx, method = "lo", df=degf(nhn.f.mx))
+d.4<-svyciprop(~chlm=="-", nhn.f.mx, method = "lo", df=degf(nhn.f.mx))
+attr(c.4, "ci")
+attr(d.4, "ci")
+#herp2/HSV2
+round(svymean(~herp2, nhn.f.mx, na.rm=TRUE), 4)*100
+e.4<-svyciprop(~herp2=="+", nhn.f.mx, method = "lo", df=degf(nhn.f.mx))
+f.4<-svyciprop(~herp2=="-", nhn.f.mx, method = "lo", df=degf(nhn.f.mx))
+attr(e.4, "ci")
+attr(f.4, "ci")
+#hepc
+round(svymean(~hepc, nhn.f.mx, na.rm=TRUE), 4)*100
+g.4<-svyciprop(~hepc=="+", nhn.f.mx, method = "lo", df=degf(nhn.f.mx))
+h.4<-svyciprop(~hepc=="-", nhn.f.mx, method = "lo", df=degf(nhn.f.mx))
+attr(g.4, "ci")
+attr(h.4, "ci")
+#ever.sti
+round(svymean(~ever.sti, nhn.f.mx, na.rm=TRUE), 4)*100
+i.4<-svyciprop(~ever.sti=="Yes", nhn.f.mx, method = "lo", df=degf(nhn.f.mx))
+j.4<-svyciprop(~ever.sti=="No", nhn.f.mx, method = "lo", df=degf(nhn.f.mx))
+attr(i.4, "ci")
+attr(j.4, "ci")
+#sr.gonorr
+round(svymean(~sr.gonorr, nhn.f.mx, na.rm=TRUE), 4)*100
+k.4<-svyciprop(~sr.gonorr=="Yes", nhn.f.mx, method = "lo", df=degf(nhn.f.mx))
+l.4<-svyciprop(~sr.gonorr=="No", nhn.f.mx, method = "lo", df=degf(nhn.f.mx))
+attr(k.4, "ci")
+attr(l.4, "ci")
+#sr.chlm
+round(svymean(~sr.chlm, nhn.f.mx, na.rm=TRUE), 4)*100
+m.4<-svyciprop(~sr.chlm=="Yes", nhn.f.mx, method = "lo", df=degf(nhn.f.mx))
+n.4<-svyciprop(~sr.chlm=="No", nhn.f.mx, method = "lo", df=degf(nhn.f.mx))
+attr(m.4, "ci")
+attr(n.4, "ci")
+#sr.herp
+round(svymean(~sr.herp, nhn.f.mx, na.rm=TRUE), 4)*100
+o.4<-svyciprop(~sr.herp=="Yes", nhn.f.mx, method = "lo", df=degf(nhn.f.mx))
+p.4<-svyciprop(~sr.herp=="No", nhn.f.mx, method = "lo", df=degf(nhn.f.mx))
+attr(o.4, "ci")
+attr(p.4, "ci")
+#sr.gwarts
+round(svymean(~sr.gwarts, nhn.f.mx, na.rm=TRUE), 4)*100
+q.4<-svyciprop(~sr.gwarts=="Yes", nhn.f.mx, method = "lo", df=degf(nhn.f.mx))
+r.4<-svyciprop(~sr.gwarts=="No", nhn.f.mx, method = "lo", df=degf(nhn.f.mx))
+attr(q.4, "ci")
+attr(r.4, "ci")
+#sr.hiv.test
+round(svymean(~sr.hiv.test, nhn.f.mx, na.rm=TRUE), 4)*100
+s.4<-svyciprop(~sr.hiv.test=="Yes", nhn.f.mx, method = "lo", df=degf(nhn.f.mx))
+t.4<-svyciprop(~sr.hiv.test=="No", nhn.f.mx, method = "lo", df=degf(nhn.f.mx))
+attr(s.4, "ci")
+attr(t.4, "ci")
+
+```
+#Chi-Square for Significance of Difference Between Race/Ethnicity Groups
+
+```{r chisq female w.prev X races, echo=FALSE}
+#here's how to get the chi-sq tests for diff x groups
+#FEMALE
+#hiv
+svychisq(~hiv+race.eth, design=nhn.all.fem,statistic=c("Chisq"), na.rm=TRUE)
+#chlm
+svychisq(~chlm+race.eth, design=nhn.all.fem,statistic=c("Chisq"), na.rm=TRUE)
+#herp2
+svychisq(~herp2+race.eth, design=nhn.all.fem,statistic=c("Chisq"), na.rm=TRUE)
+#hepc
+svychisq(~hepc+race.eth, design=nhn.all.fem,statistic=c("Chisq"), na.rm=TRUE)
+#ever.sti
+svychisq(~ever.sti+race.eth, design=nhn.all.fem,statistic=c("Chisq"), na.rm=TRUE)
+#sr.gonorr
+svychisq(~sr.gonorr+race.eth, design=nhn.all.fem,statistic=c("Chisq"), na.rm=TRUE)
+#sr.chlm
+svychisq(~sr.chlm+race.eth, design=nhn.all.fem,statistic=c("Chisq"), na.rm=TRUE)
+#sr.herp
+svychisq(~sr.herp+race.eth, design=nhn.all.fem,statistic=c("Chisq"), na.rm=TRUE)
+#sr.gwarts
+svychisq(~sr.gwarts+race.eth, design=nhn.all.fem,statistic=c("Chisq"), na.rm=TRUE)
+#sr.hiv.test
+svychisq(~sr.hiv.test+race.eth, design=nhn.all.fem,statistic=c("Chisq"), na.rm=TRUE)
+
+```
+
+
+```{r mv log reg prep, echo=FALSE}
+library(jtools)
+
+#recode variables to binary for multivariate logistic regression
+nhanes.logreg <- nhanes.final %>% 
+  mutate(hiv.b= recode(hiv,
+                     '+'=1,
+                     '-'=0)) %>%
+  mutate(chlm.b= recode(chlm,
+                        '+'=1,
+                        '-'=0))%>%
+  mutate(herp2.b= recode(herp2,
+                        '+'=1,
+                        '-'=0))%>%
+  mutate(hepc.b= recode(hepc,
+                        '+'=1,
+                        '-'=0))%>%
+  mutate(sr.herp.b= recode(sr.herp,
+                        'Yes'=1,
+                        'No'=0))%>%
+  mutate(sr.gwarts.b= recode(sr.gwarts,
+                        'Yes'=1,
+                        'No'=0))%>%
+  mutate(sr.gonorr.b= recode(sr.gonorr,
+                        'Yes'=1,
+                        'No'=0))%>%
+  mutate(sr.chlm.b= recode(sr.chlm,
+                        'Yes'=1,
+                        'No'=0))%>%
+  mutate(sr.hiv.test.b= recode(sr.hiv.test,
+                               'Yes'=1,
+                               'No'=0))%>%
+  mutate(ever.sti.b= recode(ever.sti,
+                            'Yes'=1,
+                            'No'=0))%>%
+  mutate(race.eth= fct_relevel(race.eth,  #relevel so White is the reference group for race.eth
+                               "White",
+                               "African American",
+                               "Hispanic",
+                               "Mixed, other"))%>%
+  mutate(educ= fct_relevel(educ,
+                           "HS grad/GED", #relevel so HS grad/GED is reference group for race.eth
+                           "<9th",
+                           "9th to 11th",
+                           "Some College/AA",
+                           "College Grad or above"))
+
+
+#UPDATE SURVEY DESIGN
+
+#sample weight for aggregate data is MEC14YR
+#do not na.omit with survey data. you need the whole set for the weights to work
+svydsgn2 <- svydesign(data = nhanes.logreg,
+                     id=~SDMVPSU,
+                     strata = ~SDMVSTRA,
+                     weights = ~MEC14YR,
+                     nest=TRUE)
+#subset by age
+restr.age2 <- subset(svydsgn2,
+                        age>=20,
+                        age<=49,
+                        options(na.action = "na.pass"))
+
+#subset by gender
+nhn.all.male <- subset(restr.age2, 
+                       gend=="Male",
+                       options(na.action = "na.pass"))
+nhn.all.fem <- subset(restr.age2,
+                      gend=="Female", 
+                      options(na.action = "na.pass"))
+
+#Reference levels for categorical var: White, HS grad/GED, Over 20k, Married, Born in US, Has health insurance, has place to go for HC, working at job/business
+
+```
+
+#Multivariate Logistic Regression for Males
+Variables Controlled for : age, education, family income, marital status, birthplace, health insurance status, health care access, employment
+Variables in Orig Study that were not found: Regular Healthcare Provider
+
+```{r mv log reg males, echo=FALSE}
+#MALES
+#hiv
+#first create the mv logreg
+m.hiv.logreg <- svyglm(hiv.b~race.eth+age+educ+fam.inc+marital+birthpl+h.insur+reg.hplace+occup, design=nhn.all.male, family=quasibinomial())
+#then produce the stats
+summ(m.hiv.logreg,
+     exp=TRUE,
+     confint=TRUE,
+     model.fit = TRUE,
+     model.info = TRUE,
+     digits=2,
+     vifs = TRUE)
+#chlamydia
+m.chlm.logreg <- svyglm(chlm.b~race.eth+age+educ+fam.inc+marital+birthpl+h.insur+reg.hplace+occup, design=nhn.all.male, family=quasibinomial())
+
+summ(m.chlm.logreg,
+     exp=TRUE,
+     confint=TRUE,
+     model.fit = TRUE,
+     model.info = TRUE,
+     digits=2,
+     vifs = TRUE)
+#HSV-2
+m.herp2.logreg <- svyglm(herp2.b~race.eth+age+educ+fam.inc+marital+birthpl+h.insur+reg.hplace+occup, design=nhn.all.male, family=quasibinomial())
+
+summ(m.herp2.logreg,
+     exp=TRUE,
+     confint=TRUE,
+     model.fit = TRUE,
+     model.info = TRUE,
+     digits=2,
+     vifs = TRUE)
+#Hep C
+m.hepc.logreg <- svyglm(hepc.b~race.eth+age+educ+fam.inc+marital+birthpl+h.insur+reg.hplace+occup, design=nhn.all.male, family=quasibinomial())
+
+summ(m.hepc.logreg,
+     exp=TRUE,
+     confint=TRUE,
+     model.fit = TRUE,
+     model.info = TRUE,
+     digits=2,
+     vifs = TRUE)
+#self-reported ever sti
+m.ever.sti.logreg <- svyglm(ever.sti.b~race.eth+age+educ+fam.inc+marital+birthpl+h.insur+reg.hplace+occup, design=nhn.all.male, family=quasibinomial())
+
+summ(m.ever.sti.logreg,
+     exp=TRUE,
+     confint=TRUE,
+     model.fit = TRUE,
+     model.info = TRUE,
+     digits=2,
+     vifs = TRUE)
+#sr gonorrhea
+m.sr.gonorr.logreg <- svyglm(sr.gonorr.b~race.eth+age+educ+fam.inc+marital+birthpl+h.insur+reg.hplace+occup, design=nhn.all.male, family=quasibinomial())
+
+summ(m.sr.gonorr.logreg,
+     exp=TRUE,
+     confint=TRUE,
+     model.fit = TRUE,
+     model.info = TRUE,
+     digits=2,
+     vifs = TRUE)
+#sr chlamydia
+m.sr.chlm.logreg <- svyglm(sr.chlm.b~race.eth+age+educ+fam.inc+marital+birthpl+h.insur+reg.hplace+occup, design=nhn.all.male, family=quasibinomial())
+
+summ(m.sr.chlm.logreg,
+     exp=TRUE,
+     confint=TRUE,
+     model.fit = TRUE,
+     model.info = TRUE,
+     digits=2,
+     vifs = TRUE)
+#sr herpes
+m.sr.herp.logreg <- svyglm(sr.herp.b~race.eth+age+educ+fam.inc+marital+birthpl+h.insur+reg.hplace+occup, design=nhn.all.male, family=quasibinomial())
+
+summ(m.sr.herp.logreg,
+     exp=TRUE,
+     confint=TRUE,
+     model.fit = TRUE,
+     model.info = TRUE,
+     digits=2,
+     vifs = TRUE)
+#sr genital warts
+m.sr.gwarts.logreg <- svyglm(sr.gwarts.b~race.eth+age+educ+fam.inc+marital+birthpl+h.insur+reg.hplace+occup, design=nhn.all.male, family=quasibinomial())
+
+summ(m.sr.gwarts.logreg,
+     exp=TRUE,
+     confint=TRUE,
+     model.fit = TRUE,
+     model.info = TRUE,
+     digits=2,
+     vifs = TRUE)
+#sr hiv test
+m.sr.hiv.test.logreg <- svyglm(sr.hiv.test.b~race.eth+age+educ+fam.inc+marital+birthpl+h.insur+reg.hplace+occup, design=nhn.all.male, family=quasibinomial())
+
+summ(m.sr.hiv.test.logreg,
+     exp=TRUE,
+     confint=TRUE,
+     model.fit = TRUE,
+     model.info = TRUE,
+     digits=2,
+     vifs = TRUE)
+
+```
+#Multivariate Logistic Regression for Females
+
+```{r mv log reg female, echo=FALSE}
+#FEMALES
+
+#hiv
+#first create mv logreg
+f.hiv.logreg <- svyglm(hiv.b~race.eth+age+educ+fam.inc+marital+birthpl+h.insur+reg.hplace+occup, design=nhn.all.fem, family=quasibinomial())
+#then produce the stats
+summ(f.hiv.logreg,
+     exp=TRUE,
+     confint=TRUE,
+     model.fit = TRUE,
+     model.info = TRUE,
+     digits=4,
+     vifs = TRUE)
+#chlamydia
+f.chlm.logreg <- svyglm(chlm.b~race.eth+age+educ+fam.inc+marital+birthpl+h.insur+reg.hplace+occup, design=nhn.all.fem, family=quasibinomial())
+
+summ(f.chlm.logreg,
+     exp=TRUE,
+     confint=TRUE,
+     model.fit = TRUE,
+     model.info = TRUE,
+     digits=4,
+     vifs = TRUE)
+#HSV-2
+f.herp2.logreg <- svyglm(herp2.b~race.eth+age+educ+fam.inc+marital+birthpl+h.insur+reg.hplace+occup, design=nhn.all.fem, family=quasibinomial())
+
+summ(f.herp2.logreg,
+     exp=TRUE,
+     confint=TRUE,
+     model.fit = TRUE,
+     model.info = TRUE,
+     digits=4,
+     vifs = TRUE)
+#Hep C
+f.hepc.logreg <- svyglm(hepc.b~race.eth+age+educ+fam.inc+marital+birthpl+h.insur+reg.hplace+occup, design=nhn.all.fem, family=quasibinomial())
+
+summ(f.hepc.logreg,
+     exp=TRUE,
+     confint=TRUE,
+     model.fit = TRUE,
+     model.info = TRUE,
+     digits=4,
+     vifs = TRUE)
+#sr ever sti
+f.ever.sti.logreg <- svyglm(ever.sti.b~race.eth+age+educ+fam.inc+marital+birthpl+h.insur+reg.hplace+occup, design=nhn.all.fem, family=quasibinomial())
+
+summ(f.ever.sti.logreg,
+     exp=TRUE,
+     confint=TRUE,
+     model.fit = TRUE,
+     model.info = TRUE,
+     digits=4,
+     vifs = TRUE)
+#sr gonorrhea
+f.sr.gonorr.logreg <- svyglm(sr.gonorr.b~race.eth+age+educ+fam.inc+marital+birthpl+h.insur+reg.hplace+occup, design=nhn.all.fem, family=quasibinomial())
+
+summ(f.sr.gonorr.logreg,
+     exp=TRUE,
+     confint=TRUE,
+     model.fit = TRUE,
+     model.info = TRUE,
+     digits=4,
+     vifs = TRUE)
+#sr chlamydia
+f.sr.chlm.logreg <- svyglm(sr.chlm.b~race.eth+age+educ+fam.inc+marital+birthpl+h.insur+reg.hplace+occup, design=nhn.all.fem, family=quasibinomial())
+
+summ(f.sr.chlm.logreg,
+     exp=TRUE,
+     confint=TRUE,
+     model.fit = TRUE,
+     model.info = TRUE,
+     digits=4,
+     vifs = TRUE)
+#sr herpes
+f.sr.herp.logreg <- svyglm(sr.herp.b~race.eth+age+educ+fam.inc+marital+birthpl+h.insur+reg.hplace+occup, design=nhn.all.fem, family=quasibinomial())
+
+summ(f.sr.herp.logreg,
+     exp=TRUE,
+     confint=TRUE,
+     model.fit = TRUE,
+     model.info = TRUE,
+     digits=4,
+     vifs = TRUE)
+#sr genital warts
+f.sr.gwarts.logreg <- svyglm(sr.gwarts.b~race.eth+age+educ+fam.inc+marital+birthpl+h.insur+reg.hplace+occup, design=nhn.all.fem, family=quasibinomial())
+
+summ(f.sr.gwarts.logreg,
+     exp=TRUE,
+     confint=TRUE,
+     model.fit = TRUE,
+     model.info = TRUE,
+     digits=4,
+     vifs = TRUE)
+#sr hiv test
+f.sr.hiv.test.logreg <- svyglm(sr.hiv.test.b~race.eth+age+educ+fam.inc+marital+birthpl+h.insur+reg.hplace+occup, design=nhn.all.fem, family=quasibinomial())
+
+summ(f.sr.hiv.test.logreg,
+     exp=TRUE,
+     confint=TRUE,
+     model.fit = TRUE,
+     model.info = TRUE,
+     digits=4,
+     vifs = TRUE)
+
+```
+#Assumption Checking
+
+1. Observations are independent. - MET
+2. No Multicollinearity - NOT MET
+      Evidence of multicollinearity evident when VIF scores exceeded 10.  This was especially present for race/ethnicity, education, and marital status across the logistic regressions.
+      
+3. Linearity - MET
+    The only continuous variable in the logistic regressions is age, so we test its linearity across all the models. All logistic regressions met the assumption of linearity for age. 
+
+```{r assumptions for mv logreg, echo=FALSE}
+#MALE
+#hiv
+logodds<- log(x=m.hiv.logreg$fitted.values/(1-m.hiv.logreg$fitted.values))
+
+linearity.data <- data.frame(logodds, age= m.hiv.logreg$model$age)
+
+linearity.data %>% 
+  ggplot(aes(x=age, y=logodds))+
+  geom_point(aes(size="Observation"), color = "gray60", alpha= 0.6)+
+  geom_smooth(se=FALSE, aes(color= "Loess curse")) +
+  geom_smooth(method = lm, se= FALSE, aes(color= "Linear"))+
+  theme_minimal()+
+  labs(x="Age in Years", y="Log-odds of predicted probability of having HIV antibodies for males") +
+  scale_color_manual(name="Type of Fit Line", values=c("dodgerblue2", "deeppink"))+
+  scale_size_manual(values = 1.5, name="")
+#chlm
+logodds<- log(x=m.chlm.logreg$fitted.values/(1-m.chlm.logreg$fitted.values))
+
+linearity.data <- data.frame(logodds, age= m.chlm.logreg$model$age)
+
+linearity.data %>% 
+  ggplot(aes(x=age, y=logodds))+
+  geom_point(aes(size="Observation"), color = "gray60", alpha= 0.6)+
+  geom_smooth(se=FALSE, aes(color= "Loess curse")) +
+  geom_smooth(method = lm, se= FALSE, aes(color= "Linear"))+
+  theme_minimal()+
+  labs(x="Age in Years", y="Log-odds of predicted probability of testing positive for chlamydia for males") +
+  scale_color_manual(name="Type of Fit Line", values=c("dodgerblue2", "deeppink"))+
+  scale_size_manual(values = 1.5, name="")
+#herp2
+logodds<- log(x=m.herp2.logreg$fitted.values/(1-m.herp2.logreg$fitted.values))
+
+linearity.data <- data.frame(logodds, age= m.herp2.logreg$model$age)
+
+linearity.data %>% 
+  ggplot(aes(x=age, y=logodds))+
+  geom_point(aes(size="Observation"), color = "gray60", alpha= 0.6)+
+  geom_smooth(se=FALSE, aes(color= "Loess curse")) +
+  geom_smooth(method = lm, se= FALSE, aes(color= "Linear"))+
+  theme_minimal()+
+  labs(x="Age in Years", y="Log-odds of predicted probability of testing positive for HSV-2 for males") +
+  scale_color_manual(name="Type of Fit Line", values=c("dodgerblue2", "deeppink"))+
+  scale_size_manual(values = 1.5, name="")
+#hepc
+logodds<- log(x=m.hepc.logreg$fitted.values/(1-m.hepc.logreg$fitted.values))
+
+linearity.data <- data.frame(logodds, age= m.hepc.logreg$model$age)
+
+linearity.data %>% 
+  ggplot(aes(x=age, y=logodds))+
+  geom_point(aes(size="Observation"), color = "gray60", alpha= 0.6)+
+  geom_smooth(se=FALSE, aes(color= "Loess curse")) +
+  geom_smooth(method = lm, se= FALSE, aes(color= "Linear"))+
+  theme_minimal()+
+  labs(x="Age in Years", y="Log-odds of predicted probability of testing positive for Hepatitis C antibodies for males") +
+  scale_color_manual(name="Type of Fit Line", values=c("dodgerblue2", "deeppink"))+
+  scale_size_manual(values = 1.5, name="")
+#ever.sti
+logodds<- log(x=m.ever.sti.logreg$fitted.values/(1-m.ever.sti.logreg$fitted.values))
+
+linearity.data <- data.frame(logodds, age= m.ever.sti.logreg$model$age)
+
+linearity.data %>% 
+  ggplot(aes(x=age, y=logodds))+
+  geom_point(aes(size="Observation"), color = "gray60", alpha= 0.6)+
+  geom_smooth(se=FALSE, aes(color= "Loess curse")) +
+  geom_smooth(method = lm, se= FALSE, aes(color= "Linear"))+
+  theme_minimal()+
+  labs(x="Age in Years", y="Log-odds of predicted probability of self-reporting any lifetime STI for males") +
+  scale_color_manual(name="Type of Fit Line", values=c("dodgerblue2", "deeppink"))+
+  scale_size_manual(values = 1.5, name="")
+#sr gonorr
+logodds<- log(x=m.sr.gonorr.logreg$fitted.values/(1-m.sr.gonorr.logreg$fitted.values))
+
+linearity.data <- data.frame(logodds, age= m.sr.gonorr.logreg$model$age)
+
+linearity.data %>% 
+  ggplot(aes(x=age, y=logodds))+
+  geom_point(aes(size="Observation"), color = "gray60", alpha= 0.6)+
+  geom_smooth(se=FALSE, aes(color= "Loess curse")) +
+  geom_smooth(method = lm, se= FALSE, aes(color= "Linear"))+
+  theme_minimal()+
+  labs(x="Age in Years", y="Log-odds of predicted probability of self-reporting gonorrhea for males") +
+  scale_color_manual(name="Type of Fit Line", values=c("dodgerblue2", "deeppink"))+
+  scale_size_manual(values = 1.5, name="")
+#sr chlm
+logodds<- log(x=m.sr.chlm.logreg$fitted.values/(1-m.sr.chlm.logreg$fitted.values))
+
+linearity.data <- data.frame(logodds, age= m.sr.chlm.logreg$model$age)
+
+linearity.data %>% 
+  ggplot(aes(x=age, y=logodds))+
+  geom_point(aes(size="Observation"), color = "gray60", alpha= 0.6)+
+  geom_smooth(se=FALSE, aes(color= "Loess curse")) +
+  geom_smooth(method = lm, se= FALSE, aes(color= "Linear"))+
+  theme_minimal()+
+  labs(x="Age in Years", y="Log-odds of predicted probability of self-reporting chlamydia for males") +
+  scale_color_manual(name="Type of Fit Line", values=c("dodgerblue2", "deeppink"))+
+  scale_size_manual(values = 1.5, name="")
+#sr herp
+logodds<- log(x=m.sr.herp.logreg$fitted.values/(1-m.sr.herp.logreg$fitted.values))
+
+linearity.data <- data.frame(logodds, age= m.sr.herp.logreg$model$age)
+
+linearity.data %>% 
+  ggplot(aes(x=age, y=logodds))+
+  geom_point(aes(size="Observation"), color = "gray60", alpha= 0.6)+
+  geom_smooth(se=FALSE, aes(color= "Loess curse")) +
+  geom_smooth(method = lm, se= FALSE, aes(color= "Linear"))+
+  theme_minimal()+
+  labs(x="Age in Years", y="Log-odds of predicted probability of self-reporting genital herpes for males") +
+  scale_color_manual(name="Type of Fit Line", values=c("dodgerblue2", "deeppink"))+
+  scale_size_manual(values = 1.5, name="")
+#sr gwarts
+logodds<- log(x=m.sr.gwarts.logreg$fitted.values/(1-m.sr.gwarts.logreg$fitted.values))
+
+linearity.data <- data.frame(logodds, age= m.sr.gwarts.logreg$model$age)
+
+linearity.data %>% 
+  ggplot(aes(x=age, y=logodds))+
+  geom_point(aes(size="Observation"), color = "gray60", alpha= 0.6)+
+  geom_smooth(se=FALSE, aes(color= "Loess curse")) +
+  geom_smooth(method = lm, se= FALSE, aes(color= "Linear"))+
+  theme_minimal()+
+  labs(x="Age in Years", y="Log-odds of predicted probability of self-reporting genital warts for males") +
+  scale_color_manual(name="Type of Fit Line", values=c("dodgerblue2", "deeppink"))+
+  scale_size_manual(values = 1.5, name="")
+#sr hiv test
+logodds<- log(x=m.sr.hiv.test.logreg$fitted.values/(1-m.sr.hiv.test.logreg$fitted.values))
+
+linearity.data <- data.frame(logodds, age= m.sr.hiv.test.logreg$model$age)
+
+linearity.data %>% 
+  ggplot(aes(x=age, y=logodds))+
+  geom_point(aes(size="Observation"), color = "gray60", alpha= 0.6)+
+  geom_smooth(se=FALSE, aes(color= "Loess curse")) +
+  geom_smooth(method = lm, se= FALSE, aes(color= "Linear"))+
+  theme_minimal()+
+  labs(x="Age in Years", y="Log-odds of predicted probability of self-reporting an HIV test for males") +
+  scale_color_manual(name="Type of Fit Line", values=c("dodgerblue2", "deeppink"))+
+  scale_size_manual(values = 1.5, name="")
+
+
+
+#FEMALE
+#hiv
+logodds<- log(x=f.hiv.logreg$fitted.values/(1-f.hiv.logreg$fitted.values))
+
+linearity.data <- data.frame(logodds, age= f.hiv.logreg$model$age)
+
+linearity.data %>% 
+  ggplot(aes(x=age, y=logodds))+
+  geom_point(aes(size="Observation"), color = "gray60", alpha= 0.6)+
+  geom_smooth(se=FALSE, aes(color= "Loess curse")) +
+  geom_smooth(method = lm, se= FALSE, aes(color= "Linear"))+
+  theme_minimal()+
+  labs(x="Age in Years", y="Log-odds of predicted probability of having HIV antibodies for females") +
+  scale_color_manual(name="Type of Fit Line", values=c("dodgerblue2", "deeppink"))+
+  scale_size_manual(values = 1.5, name="")
+#chlm
+logodds<- log(x=f.chlm.logreg$fitted.values/(1-f.chlm.logreg$fitted.values))
+
+linearity.data <- data.frame(logodds, age= f.chlm.logreg$model$age)
+
+linearity.data %>% 
+  ggplot(aes(x=age, y=logodds))+
+  geom_point(aes(size="Observation"), color = "gray60", alpha= 0.6)+
+  geom_smooth(se=FALSE, aes(color= "Loess curse")) +
+  geom_smooth(method = lm, se= FALSE, aes(color= "Linear"))+
+  theme_minimal()+
+  labs(x="Age in Years", y="Log-odds of predicted probability of testing positive for chlamydia for females") +
+  scale_color_manual(name="Type of Fit Line", values=c("dodgerblue2", "deeppink"))+
+  scale_size_manual(values = 1.5, name="")
+#herp2
+logodds<- log(x=f.herp2.logreg$fitted.values/(1-f.herp2.logreg$fitted.values))
+
+linearity.data <- data.frame(logodds, age= f.herp2.logreg$model$age)
+
+linearity.data %>% 
+  ggplot(aes(x=age, y=logodds))+
+  geom_point(aes(size="Observation"), color = "gray60", alpha= 0.6)+
+  geom_smooth(se=FALSE, aes(color= "Loess curse")) +
+  geom_smooth(method = lm, se= FALSE, aes(color= "Linear"))+
+  theme_minimal()+
+  labs(x="Age in Years", y="Log-odds of predicted probability of testing positive for HSV-2 for females") +
+  scale_color_manual(name="Type of Fit Line", values=c("dodgerblue2", "deeppink"))+
+  scale_size_manual(values = 1.5, name="")
+#hepc
+logodds<- log(x=f.hepc.logreg$fitted.values/(1-f.hepc.logreg$fitted.values))
+
+linearity.data <- data.frame(logodds, age= f.hepc.logreg$model$age)
+
+linearity.data %>% 
+  ggplot(aes(x=age, y=logodds))+
+  geom_point(aes(size="Observation"), color = "gray60", alpha= 0.6)+
+  geom_smooth(se=FALSE, aes(color= "Loess curse")) +
+  geom_smooth(method = lm, se= FALSE, aes(color= "Linear"))+
+  theme_minimal()+
+  labs(x="Age in Years", y="Log-odds of predicted probability of testing positive for Hepatitis C antibodies for females") +
+  scale_color_manual(name="Type of Fit Line", values=c("dodgerblue2", "deeppink"))+
+  scale_size_manual(values = 1.5, name="")
+#ever.sti
+logodds<- log(x=f.ever.sti.logreg$fitted.values/(1-f.ever.sti.logreg$fitted.values))
+
+linearity.data <- data.frame(logodds, age= f.ever.sti.logreg$model$age)
+
+linearity.data %>% 
+  ggplot(aes(x=age, y=logodds))+
+  geom_point(aes(size="Observation"), color = "gray60", alpha= 0.6)+
+  geom_smooth(se=FALSE, aes(color= "Loess curse")) +
+  geom_smooth(method = lm, se= FALSE, aes(color= "Linear"))+
+  theme_minimal()+
+  labs(x="Age in Years", y="Log-odds of predicted probability of self-reporting any lifetime STI for females") +
+  scale_color_manual(name="Type of Fit Line", values=c("dodgerblue2", "deeppink"))+
+  scale_size_manual(values = 1.5, name="")
+#sr gonorr
+logodds<- log(x=f.sr.gonorr.logreg$fitted.values/(1-f.sr.gonorr.logreg$fitted.values))
+
+linearity.data <- data.frame(logodds, age= f.sr.gonorr.logreg$model$age)
+
+linearity.data %>% 
+  ggplot(aes(x=age, y=logodds))+
+  geom_point(aes(size="Observation"), color = "gray60", alpha= 0.6)+
+  geom_smooth(se=FALSE, aes(color= "Loess curse")) +
+  geom_smooth(method = lm, se= FALSE, aes(color= "Linear"))+
+  theme_minimal()+
+  labs(x="Age in Years", y="Log-odds of predicted probability of self-reporting gonorrhea for females") +
+  scale_color_manual(name="Type of Fit Line", values=c("dodgerblue2", "deeppink"))+
+  scale_size_manual(values = 1.5, name="")
+#sr chlm
+logodds<- log(x=f.sr.chlm.logreg$fitted.values/(1-f.sr.chlm.logreg$fitted.values))
+
+linearity.data <- data.frame(logodds, age= f.sr.chlm.logreg$model$age)
+
+linearity.data %>% 
+  ggplot(aes(x=age, y=logodds))+
+  geom_point(aes(size="Observation"), color = "gray60", alpha= 0.6)+
+  geom_smooth(se=FALSE, aes(color= "Loess curse")) +
+  geom_smooth(method = lm, se= FALSE, aes(color= "Linear"))+
+  theme_minimal()+
+  labs(x="Age in Years", y="Log-odds of predicted probability of self-reporting chlamydia for females") +
+  scale_color_manual(name="Type of Fit Line", values=c("dodgerblue2", "deeppink"))+
+  scale_size_manual(values = 1.5, name="")
+#sr herp
+logodds<- log(x=f.sr.herp.logreg$fitted.values/(1-f.sr.herp.logreg$fitted.values))
+
+linearity.data <- data.frame(logodds, age= f.sr.herp.logreg$model$age)
+
+linearity.data %>% 
+  ggplot(aes(x=age, y=logodds))+
+  geom_point(aes(size="Observation"), color = "gray60", alpha= 0.6)+
+  geom_smooth(se=FALSE, aes(color= "Loess curse")) +
+  geom_smooth(method = lm, se= FALSE, aes(color= "Linear"))+
+  theme_minimal()+
+  labs(x="Age in Years", y="Log-odds of predicted probability of self-reporting genital herpes for females") +
+  scale_color_manual(name="Type of Fit Line", values=c("dodgerblue2", "deeppink"))+
+  scale_size_manual(values = 1.5, name="")
+#sr gwarts
+logodds<- log(x=f.sr.gwarts.logreg$fitted.values/(1-f.sr.gwarts.logreg$fitted.values))
+
+linearity.data <- data.frame(logodds, age= f.sr.gwarts.logreg$model$age)
+
+linearity.data %>% 
+  ggplot(aes(x=age, y=logodds))+
+  geom_point(aes(size="Observation"), color = "gray60", alpha= 0.6)+
+  geom_smooth(se=FALSE, aes(color= "Loess curse")) +
+  geom_smooth(method = lm, se= FALSE, aes(color= "Linear"))+
+  theme_minimal()+
+  labs(x="Age in Years", y="Log-odds of predicted probability of self-reporting genital warts for females") +
+  scale_color_manual(name="Type of Fit Line", values=c("dodgerblue2", "deeppink"))+
+  scale_size_manual(values = 1.5, name="")
+#sr hiv test
+logodds<- log(x=f.sr.hiv.test.logreg$fitted.values/(1-f.sr.hiv.test.logreg$fitted.values))
+
+linearity.data <- data.frame(logodds, age= f.sr.hiv.test.logreg$model$age)
+
+linearity.data %>% 
+  ggplot(aes(x=age, y=logodds))+
+  geom_point(aes(size="Observation"), color = "gray60", alpha= 0.6)+
+  geom_smooth(se=FALSE, aes(color= "Loess curse")) +
+  geom_smooth(method = lm, se= FALSE, aes(color= "Linear"))+
+  theme_minimal()+
+  labs(x="Age in Years", y="Log-odds of predicted probability of self-reporting an HIV test for females") +
+  scale_color_manual(name="Type of Fit Line", values=c("dodgerblue2", "deeppink"))+
+  scale_size_manual(values = 1.5, name="")
+
+```
+
+
+#Codebook Generation
+```{r codebook, echo=FALSE}
+library(dataMaid) 
+library(expss) 
+
+#add descriptives for the codebook
+nhanes.cdbk <- nhanes.final%>%
+    mutate(race.eth= fct_relevel(race.eth,  #relevel so White is the reference group for race.eth
+                               "White",
+                               "African American",
+                               "Hispanic",
+                               "Mixed, other"))%>%
+    mutate(educ= fct_relevel(educ,
+                           "HS grad/GED", #relevel so HS grad/GED is reference group for race.eth
+                           "<9th",
+                           "9th to 11th",
+                           "Some College/AA",
+                           "College Grad or above"))
+
+nhanes.codebook = apply_labels(nhanes.cdbk,
+                            SEQN= "Respondent sequence number.",
+                            SDDSRVYR= "Data release number.",
+                            SDMVPSU= "Masked variance Pseudo-PSU.",
+                            SDMVSTRA= "Masked variance Pseudo-Stratum.",
+                            WTMEC4YR = "Full sample 4 year MEC Exam Weight.",
+                            race.eth = "Race/Ethnicity",
+                            age= "Age at screening adjudicated.",
+                            gend= "Gender",
+                            educ= "Education Level - Adults 20+",
+                            fam.inc= "Annual family income.",
+                            marital= "Marital status.",
+                            birthpl= "Country of Birth.",
+                            WTMEC2YR= "Full sample 2 year MEC Exam Weight.",
+                            MEC14YR= "Full sample 14 year MEC Exam Weight.",
+                            hepc = "Hepatitis C antibody (confirmed).",
+                            hiv = "HIV antibody test result.",
+                            chlm = "Urinary Chlamydia.",
+                            herp2= "Herpes Simplex Virus II",
+                            h.insur = "Covered by health insurance.",
+                            reg.hplace = "Routine place to go for healthcare.",
+                            sr.hiv.test = "Blood ever tested for HIV virus?",
+                            sr.gonorr = "Doctor ever told you had gonorrhea?",
+                            sr.chlm = "Doctor ever told you had chlamydia?",
+                            sr.herp = "Doctor ever told you had genital herpes?",
+                            sr.gwarts= "Doctor ever told you had genital warts?",
+                            occup= "Type of work done last week.",
+                            ever.sti= "Doctor ever told you had chlamydia or gonorrhea, or chlamydia, or genital herpes, or genital warts?")
+
+attr(nhanes.codebook$WTMEC4YR, "shortDescription") <- "Both Interviewed and MEC Examined Sample Persons. Used for 1999-2002 data collection years only."
+attr(nhanes.codebook$age, "shortDescription") <- "Best age in years of the sample person at time of HH screening. Individuals 85 and over are topcoded at 85 years of age."
+attr(nhanes.codebook$fam.inc, "shortDescription") <- "Total family income (reported as above or below $20,000)."
+attr(nhanes.codebook$WTMEC2YR, "shortDescription") <- "Both Interviewed and MEC Examined Sample Persons."
+attr(nhanes.codebook$MEC14YR, "shortDescription") <- "Both Interviewed and MEC Examined Sample Persons. For cycles 1999-2000 and 2001-2002, MEC14YR = 2/7 * WTMEC4YR. For all other cycles till 2012, MEC14YR= 1/7 * WTMEC2YR."
+attr(nhanes.codebook$sr.gonorr, "shortDescription") <- "In the past 12 months."
+attr(nhanes.codebook$sr.chlm, "shortDescription") <- "In the past 12 months."
+attr(nhanes.codebook$ever.sti, "shortDescription") <- "Created from sr.gonorr, sr.chlm, sr.herp, sr.gwarts. If any of these were 'Yes', then ever.sti was 'Yes'."
+
+#Run below code to create codebook
+#makeCodebook(nhanes.codebook, replace=TRUE)
+
+```
+
+
